@@ -1,0 +1,65 @@
+# Build output
+build/
+!cmd/ideate/build/
+cmd/ideate/build/*
+!cmd/ideate/build/darwin/
+cmd/ideate/build/darwin/*
+!cmd/ideate/build/darwin/Info.plist
+!cmd/ideate/build/darwin/Info.dev.plist
+!cmd/ideate/build/darwin/entitlements.plist
+!cmd/ideate/build/darwin/icon.svg
+!cmd/ideate/build/darwin/icon.icns
+*.md5
+cmd/ideate/ideate
+cmd/ideate/wails.json.bak
+# Stray testagent binary if someone runs `go build github.com/paultyng/testagent`
+# from the repo root — the proper output path is
+# cmd/ideate/build/bin/testagent (see task build:testagent).
+/testagent
+.task/
+
+# Frontend
+frontend/dist/
+frontend/node_modules/
+frontend/src/wailsjs/
+frontend/test-results/
+frontend/playwright-report/
+
+# Playwright artifacts (also land at repo root when invoked from there)
+test-results/
+playwright-report/
+
+# Generated proto + Connect code
+internal/gen/
+
+# Dev config (IPC socket, window state, reviews — isolated from production)
+.ideate-dev/
+
+# Local /review-all output, not committed
+reviews/
+
+# Implementation plans — scratch artifacts for the /implement-plan
+# skill. The skill resolves plans by filesystem mtime, so they don't
+# need to be tracked; the PR description and commit messages capture
+# the durable "what + why" that plans drift from immediately after
+# code lands.
+docs/plans/
+
+# Task logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code local state
+.claude/scheduled_tasks.lock
+
+# Claude Code working files
+.reviews/

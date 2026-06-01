@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    runs-on: macos-14  # arm64 runner, native build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install tools
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install github.com/bufbuild/buf/cmd/buf@v1.70.0
+          go install github.com/go-task/task/v3/cmd/task@v3.51.1
+          brew install create-dmg
+
+      - name: Import signing certificate
+        uses: apple-actions/import-codesign-certs@63fff01cd422d4b7b855d40ca1e9d34d2de9427d # v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+
+      - name: Install frontend deps
+        run: cd frontend && npm ci
+
+      - name: Generate proto
+        run: cd proto && buf generate
+
+      - name: Generate Wails bindings + build frontend
+        run: |
+          mkdir -p frontend/dist && touch frontend/dist/index.html
+          cd cmd/ideate && wails generate module
+          cd ../../frontend && npm run build
+
+      - name: Build app
+        run: task build
+
+      - name: Sign app
+        env:
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          codesign --deep --force --options runtime --timestamp \
+            --entitlements cmd/ideate/build/darwin/entitlements.plist \
+            --sign "$SIGNING_IDENTITY" \
+            cmd/ideate/build/bin/ideate.app
+          codesign --verify --deep --strict --verbose=2 cmd/ideate/build/bin/ideate.app
+
+      - name: Build DMG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          create-dmg \
+            --volname "Ideate" \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "ideate.app" 150 200 \
+            --app-drop-link 450 200 \
+            "dist/Ideate-${VERSION}-arm64.dmg" \
+            "cmd/ideate/build/bin/ideate.app"
+
+      - name: Sign DMG
+        env:
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          codesign --sign "$SIGNING_IDENTITY" --timestamp "dist/Ideate-${VERSION}-arm64.dmg"
+
+      - name: Notarize + staple
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_ISSUER_ID: ${{ secrets.APPLE_API_KEY_ISSUER_ID }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "$APPLE_API_KEY_P8_BASE64" | base64 -d > /tmp/AuthKey.p8
+          xcrun notarytool submit "dist/Ideate-${VERSION}-arm64.dmg" \
+            --key /tmp/AuthKey.p8 \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_KEY_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "dist/Ideate-${VERSION}-arm64.dmg"
+          xcrun stapler validate "dist/Ideate-${VERSION}-arm64.dmg"
+          rm /tmp/AuthKey.p8
+
+      - name: Checksum
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd dist && shasum -a 256 "Ideate-${VERSION}-arm64.dmg" > "Ideate-${VERSION}-arm64.dmg.sha256"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.sha256
+          draft: false
+          generate_release_notes: true

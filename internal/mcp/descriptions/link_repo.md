@@ -1,0 +1,1 @@
+Link a canonical git repository to the current idea by creating a per-idea worktree. Pass the absolute path to the canonical clone (e.g. ~/src/github.com/foo/bar). The leaf name is auto-derived from the repo's origin remote unless 'name' is supplied. The default branch is the per-idea convention (e.g. idea/<slug>); pass 'branch' to choose another or to resume an existing one.

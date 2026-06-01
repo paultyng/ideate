@@ -1,0 +1,438 @@
+version: "3"
+
+tasks:
+  build:testagent:
+    desc: Build the testagent binary from the github.com/paultyng/testagent module (declared via the `tool` directive in go.mod).
+    # No `sources:` watch — go-task can't fingerprint a module-cache
+    # source set, and `go build` itself is already fast + cache-aware.
+    cmd: go build -o cmd/ideate/build/bin/testagent github.com/paultyng/testagent
+    generates:
+      - cmd/ideate/build/bin/testagent
+
+  frontend:dist:
+    desc: Seed frontend/dist with a placeholder so //go:embed all:dist resolves in dev (Vite serves live; real dist is built by `task build`)
+    dir: frontend
+    cmds:
+      - mkdir -p dist
+      - touch dist/.gitkeep
+    status:
+      - test -e dist/.gitkeep
+
+  dev:
+    desc: Start Wails dev server (isolated .ideate-dev — gets reseeded). Wails dev on 34116 + hooks on 34118 so it can run alongside `dev:user` (which uses the defaults 34115/34117).
+    dir: cmd/ideate
+    deps:
+      - frontend:dist
+    env:
+      IDEATE_CONFIG_DIR: "{{.ROOT_DIR}}/.ideate-dev"
+      IDEATE_IDEAS_DIR: "{{.ROOT_DIR}}/.ideate-dev/ideas"
+      IDEATE_HOOKS_PORT: "34118"
+      IDEATE_LOG_DIR: "{{.ROOT_DIR}}/logs"
+      IDEATE_CAPTURE_DIR: "{{.ROOT_DIR}}/.ideate-dev/captures"
+      # Always-on in dev so PTY/vscreen/replay diagnostics land in the
+      # tee'd log without needing to remember to set the env. See
+      # internal/agent/termdebug.go.
+      IDEATE_TERM_DEBUG: "1"
+    cmds:
+      - mkdir -p ../../logs "{{.ROOT_DIR}}/.ideate-dev/ideas"
+      - wails dev -tags dev -devserver localhost:34116 2>&1 | tee ../../logs/dev-$(date +%Y%m%d-%H%M%S).log
+
+  dev:user:
+    desc: Dogfood WIP code — wails dev against your real user data (no config/ideas overrides, no seed)
+    dir: cmd/ideate
+    deps:
+      - frontend:dist
+    env:
+      IDEATE_LOG_DIR: "{{.ROOT_DIR}}/logs"
+      IDEATE_CAPTURE_DIR: "{{.ROOT_DIR}}/logs/captures"
+      IDEATE_TERM_DEBUG: "1"
+    cmds:
+      - mkdir -p ../../logs
+      - echo "[dev:user] using OS-default config + ideas dirs (no IDEATE_*_DIR overrides, no seed)"
+      - wails dev -tags dev 2>&1 | tee ../../logs/dev-user-$(date +%Y%m%d-%H%M%S).log
+
+  cli:
+    desc: Run CLI subcommand against .ideate-dev (e.g. task cli -- status)
+    env:
+      IDEATE_CONFIG_DIR: "{{.ROOT_DIR}}/.ideate-dev"
+      IDEATE_IDEAS_DIR: "{{.ROOT_DIR}}/.ideate-dev/ideas"
+    cmds:
+      - mkdir -p logs
+      - go run -tags dev ./cmd/ideate {{.CLI_ARGS}} 2>&1 | tee logs/cli-$(date +%Y%m%d-%H%M%S).log
+
+  cli:user:
+    desc: Run CLI subcommand against your real user data (e.g. task cli:user -- status)
+    cmds:
+      - mkdir -p logs
+      - echo "[cli:user] using OS-default config + ideas dirs (no IDEATE_*_DIR overrides)"
+      - go run -tags dev ./cmd/ideate {{.CLI_ARGS}} 2>&1 | tee logs/cli-user-$(date +%Y%m%d-%H%M%S).log
+
+  build:
+    desc: Build production binary
+    dir: cmd/ideate
+    vars:
+      # Full git-describe goes into the in-app version (ldflags) — carries
+      # commit hash + dirty flag so support reports point at a specific build.
+      VERSION:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+      # CFBundleShortVersionString must be MAJOR.MINOR.PATCH for notarization
+      # / Apple tooling, so derive from the latest tag (sans v-prefix). Falls
+      # back to 0.0.0 in tagless repos so the field always parses.
+      SHORT_VERSION:
+        sh: git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo 0.0.0
+    cmds:
+      - mkdir -p ../../logs
+      - cp wails.json wails.json.bak
+      - defer: mv wails.json.bak wails.json
+      - jq --arg v "{{.SHORT_VERSION}}" '.info.productVersion = $v' wails.json.bak > wails.json
+      - wails build -ldflags "-X github.com/paultyng/ideate/internal/version.Version={{.VERSION}}" 2>&1 | tee ../../logs/build-$(date +%Y%m%d-%H%M%S).log
+
+  build:debug:
+    desc: Build with debug info
+    dir: cmd/ideate
+    vars:
+      VERSION:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+      SHORT_VERSION:
+        sh: git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo 0.0.0
+    cmds:
+      - mkdir -p ../../logs
+      - cp wails.json wails.json.bak
+      - defer: mv wails.json.bak wails.json
+      - jq --arg v "{{.SHORT_VERSION}}" '.info.productVersion = $v' wails.json.bak > wails.json
+      - wails build -debug -ldflags "-X github.com/paultyng/ideate/internal/version.Version={{.VERSION}}" 2>&1 | tee ../../logs/build-debug-$(date +%Y%m%d-%H%M%S).log
+
+  release:sign:
+    desc: Codesign cmd/ideate/build/bin/ideate.app for distribution
+    deps: [build]
+    vars:
+      SIGNING_IDENTITY: '{{.SIGNING_IDENTITY | default "-"}}'  # "-" = adhoc; override to Developer ID for real signing
+    cmds:
+      - |
+        codesign --deep --force --options runtime --timestamp \
+          --entitlements cmd/ideate/build/darwin/entitlements.plist \
+          --sign "{{.SIGNING_IDENTITY}}" \
+          cmd/ideate/build/bin/ideate.app
+      - codesign --verify --deep --strict --verbose=2 cmd/ideate/build/bin/ideate.app
+
+  release:dmg:
+    desc: Package signed .app as a DMG (requires create-dmg via Homebrew)
+    deps: [release:sign]
+    vars:
+      VERSION: '{{.VERSION | default "dev"}}'
+    cmds:
+      - mkdir -p dist
+      - |
+        create-dmg \
+          --volname "Ideate" \
+          --window-size 600 400 \
+          --icon-size 100 \
+          --icon "Ideate.app" 150 200 \
+          --app-drop-link 450 200 \
+          "dist/Ideate-{{.VERSION}}-arm64.dmg" \
+          "cmd/ideate/build/bin/ideate.app"
+
+  release:notarize:
+    desc: Notarize the DMG and staple the ticket
+    deps: [release:dmg]
+    vars:
+      VERSION: '{{.VERSION | default "dev"}}'
+    preconditions:
+      - sh: '[ -n "$APPLE_API_KEY_P8" ]'
+        msg: 'APPLE_API_KEY_P8 (path to .p8 file) must be set'
+      - sh: '[ -n "$APPLE_API_KEY_ID" ]'
+        msg: 'APPLE_API_KEY_ID must be set'
+      - sh: '[ -n "$APPLE_API_KEY_ISSUER_ID" ]'
+        msg: 'APPLE_API_KEY_ISSUER_ID must be set'
+    cmds:
+      - |
+        xcrun notarytool submit "dist/Ideate-{{.VERSION}}-arm64.dmg" \
+          --key "$APPLE_API_KEY_P8" \
+          --key-id "$APPLE_API_KEY_ID" \
+          --issuer "$APPLE_API_KEY_ISSUER_ID" \
+          --wait
+      - xcrun stapler staple "dist/Ideate-{{.VERSION}}-arm64.dmg"
+      - xcrun stapler validate "dist/Ideate-{{.VERSION}}-arm64.dmg"
+
+  test:
+    desc: Run Go tests with the race detector
+    cmd: go test -race ./...
+
+  lint:
+    desc: Run Go linter
+    cmd: golangci-lint run ./...
+
+  lint:frontend:
+    desc: Type-check frontend
+    dir: frontend
+    cmd: npx tsc --noEmit
+
+  lint:proto:
+    desc: Lint proto files
+    dir: proto
+    cmd: buf lint
+
+  fmt:
+    desc: Format Go code
+    cmd: gofmt -w .
+
+  generate:proto:
+    desc: Generate proto code into internal/gen/
+    dir: proto
+    cmd: buf generate
+    sources:
+      - "../proto/**/*.proto"
+      - "../proto/buf.gen.yaml"
+    generates:
+      - "../internal/gen/**/*.go"
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf build/
+      - find frontend/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+
+  clean:testdata:
+    desc: Remove dev test data and reset to clean state (only ever touches .ideate-dev/ideas)
+    cmds:
+      - |
+        TARGET="{{.ROOT_DIR}}/.ideate-dev/ideas"
+        case "$TARGET" in
+          */.ideate-dev/ideas) ;;
+          *) echo "refusing: target '$TARGET' is not .ideate-dev/ideas"; exit 1 ;;
+        esac
+        rm -rf "$TARGET"/*
+        echo "Dev ideas directory cleaned: $TARGET"
+
+  seed:testdata:
+    desc: Populate dev ideas directory with sample ideas in various states
+    env:
+      IDEATE_IDEAS_DIR: "{{.ROOT_DIR}}/.ideate-dev/ideas"
+      IDEATE_CONFIG_DIR: "{{.ROOT_DIR}}/.ideate-dev"
+    cmds:
+      - |
+        # Defense-in-depth: refuse to run unless IDEATE_IDEAS_DIR resolves
+        # under .ideate-dev. The seedtest binary asserts this too, but
+        # catching it here means we never even compile the binary if the
+        # env is wrong.
+        case "$IDEATE_IDEAS_DIR" in
+          */.ideate-dev/ideas) ;;
+          *) echo "refusing: IDEATE_IDEAS_DIR='$IDEATE_IDEAS_DIR' is not a .ideate-dev path"; exit 1 ;;
+        esac
+      - task: clean:testdata
+      - go run ./cmd/seedtest
+
+  clean:logs:
+    desc: Remove log files older than 7 days
+    cmd: find logs/ -type f -mtime +7 -delete 2>/dev/null || true
+
+  test:ui:
+    desc: "Start wails dev, run Playwright tests, stop."
+    vars:
+      # Well-known commits for deterministic diffs:
+      # 5a1520d = docs-only, f48af0e = M1 implementation (35 files changed)
+      TEST_DIFF_BASE: '{{.TEST_DIFF_BASE | default "5a1520d"}}'
+      TEST_DIFF_HEAD: '{{.TEST_DIFF_HEAD | default "f48af0e"}}'
+      TEST_DIFF_REPO: '{{.TEST_DIFF_REPO | default "."}}'
+      TEST_SPEC: '{{.TEST_SPEC | default ""}}'
+      TEST_TIMEOUT: '{{.TEST_TIMEOUT | default "30000"}}'
+      # Inactivity-based exit threshold; resets on every Write to the
+      # session (see Session.WatchInactivity). 30s gives orchestrator
+      # tests enough headroom for setup before the MCP-mediated write
+      # lands on the target session. idea-session tests drive `/exit`
+      # explicitly to exit ahead of the timeout.
+      TESTAGENT_AUTO_EXIT: '{{.TESTAGENT_AUTO_EXIT | default "30s"}}'
+      SAVE_SCREENSHOTS: '{{.SAVE_SCREENSHOTS | default ""}}'
+      COLLECT_SCREENSHOTS: '{{.COLLECT_SCREENSHOTS | default ""}}'
+      LOG_NAME: '{{.LOG_NAME | default "e2e"}}'
+    env:
+      TEST_DIFF_BASE: '{{.TEST_DIFF_BASE}}'
+      TEST_DIFF_HEAD: '{{.TEST_DIFF_HEAD}}'
+      TEST_DIFF_REPO: '{{.TEST_DIFF_REPO}}'
+    deps:
+      - build:testagent
+    cmds:
+      - mkdir -p logs
+      - |
+        set -e
+        LOG_FILE="logs/{{.LOG_NAME}}-$(date +%Y%m%d-%H%M%S).log"
+
+        kill_all() {
+          pkill -f 'ideate.app/Contents/MacOS/ideate' 2>/dev/null || true
+          pkill -f 'wails dev' 2>/dev/null || true
+          pkill -f 'vite.*ideate' 2>/dev/null || true
+          sleep 0.5
+          pkill -9 -f 'ideate.app/Contents/MacOS/ideate' 2>/dev/null || true
+          pkill -9 -f 'wails dev' 2>/dev/null || true
+          pkill -9 -f 'vite.*ideate' 2>/dev/null || true
+        }
+        trap kill_all EXIT
+
+        # Kill any existing instance
+        kill_all
+
+        # Start wails dev in background (isolated config + ideas dir).
+        # Wails dev on 34116, hooks on 34119 so test:ui can run alongside
+        # both `task dev:user` (34115/34117) and `task dev` (34116/34118).
+        TEST_CONFIG="$(mktemp -d)/ideate-test"
+        (cd cmd/ideate && IDEATE_CONFIG_DIR="$TEST_CONFIG" IDEATE_IDEAS_DIR="$TEST_CONFIG/ideas" IDEATE_HOOKS_PORT=34119 IDEATE_LOG_DIR="$TEST_CONFIG/logs" IDEATE_CLAUDE_PROJECTS_DIR="$TEST_CONFIG/claude-projects" TESTAGENT_AUTO_EXIT={{.TESTAGENT_AUTO_EXIT}} TESTAGENT_DELAY=50ms wails dev -tags dev -devserver localhost:34116) > "$LOG_FILE" 2>&1 &
+        echo "wails dev started, waiting for server..."
+
+        # Poll dev server (max 120s — CI first run is slow)
+        for i in $(seq 1 120); do
+          if curl -s http://localhost:34116 >/dev/null 2>&1; then
+            echo "Dev server ready after ${i}s"
+            break
+          fi
+          sleep 1
+        done
+
+        if ! curl -s http://localhost:34116 >/dev/null 2>&1; then
+          echo "FAIL: Dev server did not start within 120s"
+          cat "$LOG_FILE"
+          exit 1
+        fi
+
+        # Run Playwright tests. Reviews live in the central reviews dir
+        # under the per-run TEST_CONFIG, so seed there.
+        cd frontend && TEST_DIFF_REPO="$(cd .. && pwd)" TEST_REVIEWS_DIR="$TEST_CONFIG/reviews" TEST_CLAUDE_PROJECTS_DIR="$TEST_CONFIG/claude-projects" TEST_IDEAS_DIR="$TEST_CONFIG/ideas" SAVE_SCREENSHOTS="{{.SAVE_SCREENSHOTS}}" COLLECT_SCREENSHOTS="{{.COLLECT_SCREENSHOTS}}" npx playwright test --timeout {{.TEST_TIMEOUT}} {{.TEST_SPEC}}
+        RESULT=$?
+        echo ""
+        echo "E2E log: $LOG_FILE"
+        exit $RESULT
+
+  generate:screenshots:
+    desc: "Regenerate the README's demo screenshots into docs/media/ via Playwright."
+    cmds:
+      - mkdir -p docs/media
+      - rm -f docs/media/*.png
+      - task: test:ui
+        vars:
+          TEST_SPEC: 'screenshots.spec.ts'
+          TEST_TIMEOUT: '60000'
+          TESTAGENT_AUTO_EXIT: '30s'
+          SAVE_SCREENSHOTS: '1'
+          LOG_NAME: 'screenshots'
+
+  generate:demos:
+    desc: "Regenerate the README's animated GIFs into docs/media/ via Playwright video + ffmpeg."
+    cmds:
+      - mkdir -p docs/media
+      - rm -rf frontend/test-results
+      - task: test:ui
+        vars:
+          TEST_SPEC: 'demos.spec.ts'
+          TEST_TIMEOUT: '60000'
+          TESTAGENT_AUTO_EXIT: '30s'
+          LOG_NAME: 'demos'
+      - |
+        # Convert each captured WebM into a README-budget GIF. Playwright
+        # writes test-results/<spec>-<test-title>-chromium/video.webm.
+        # Test titles are kebab-case and map 1:1 to <name>.gif.
+        set -e
+        shopt -s nullglob
+        for vid in frontend/test-results/*/video.webm; do
+          dir=$(basename "$(dirname "$vid")")
+          # Strip the spec prefix and browser suffix to recover the test
+          # title. Pattern: demos-Demos-<title>-chromium
+          name=$(echo "$dir" | sed -E 's/^demos-Demos-//; s/-chromium(-retry[0-9]+)?$//')
+          out="docs/media/${name}.gif"
+          # -ss 0.3 trims the cream-blank pre-load frames before page.goto
+          # resolves; the GIF opens on the dashboard, not a blank canvas.
+          ffmpeg -hide_banner -loglevel error -y -ss 0.3 -i "$vid" \
+            -vf "fps=15,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse=dither=bayer" \
+            -loop 0 "$out"
+          size=$(stat -f "%z" "$out")
+          printf "wrote %s (%d KB)\n" "$out" "$((size / 1024))"
+        done
+
+  screenshot:
+    desc: "Snap the currently-running ideate window to logs/screenshots/. Pairs well with `task dev` for design iteration."
+    cmds:
+      - mkdir -p logs/screenshots
+      - |
+        # `ps -A` (vs pgrep) — `pgrep` is sometimes sandboxed and only
+        # sees processes from the calling shell's session; `ps -A` is
+        # consistent across sessions on macOS. Anchor on the full
+        # bundle MacOS/ideate path so vite/esbuild children whose
+        # paths happen to contain "ideate" don't match.
+        PID="$(ps -A -o pid,command | awk '/Contents\/MacOS\/ideate$/ && !/awk/ {print $1; exit}')"
+        if [ -z "$PID" ]; then
+          echo "no running ideate window — start one with 'task dev' or 'task dev:user' first" >&2
+          exit 1
+        fi
+        WID="$(PID=$PID osascript -l JavaScript <<'JXA'
+        ObjC.import('CoreGraphics');
+        const ref = $.CGWindowListCopyWindowInfo(
+          $.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements,
+          $.kCGNullWindowID,
+        );
+        // CGWindowListCopyWindowInfo returns a CFArrayRef. JXA gives us a
+        // Ref object that can't be deepUnwrapped directly — castRefToObject
+        // crosses the toll-free CF↔NSArray bridge so we can call .count /
+        // .objectAtIndex.
+        const ns = ObjC.castRefToObject(ref);
+        const targetPid = parseInt(
+          $.NSProcessInfo.processInfo.environment.objectForKey('PID').js, 10,
+        );
+        // wails dev opens both the app window AND a sibling layer-0
+        // window that covers most of the screen (looks like an embedded
+        // dev surface — its bounds match the display minus the menu bar).
+        // Smallest layer-0 window owned by the ideate PID is the actual
+        // app; the dev surface gets filtered out by area. Reverse the
+        // sort if you ever need the dev surface instead.
+        const candidates = [];
+        const count = ns.count;
+        for (let i = 0; i < count; i++) {
+          const w = ns.objectAtIndex(i);
+          const pid = parseInt(ObjC.unwrap(w.objectForKey('kCGWindowOwnerPID')), 10);
+          if (pid !== targetPid) continue;
+          const layer = parseInt(ObjC.unwrap(w.objectForKey('kCGWindowLayer')), 10);
+          if (layer !== 0) continue;
+          const id = parseInt(ObjC.unwrap(w.objectForKey('kCGWindowNumber')), 10);
+          const bounds = ObjC.deepUnwrap(w.objectForKey('kCGWindowBounds')) || {};
+          const area = (bounds.Width || 0) * (bounds.Height || 0);
+          candidates.push({ id, area });
+        }
+        candidates.sort((a, b) => a.area - b.area);
+        candidates.length ? String(candidates[0].id) : '';
+        JXA
+        )"
+        if [ -z "$WID" ]; then
+          echo "found ideate PID $PID but no on-screen window — is it minimized?" >&2
+          exit 1
+        fi
+        OUT="logs/screenshots/screenshot-$(date +%Y%m%d-%H%M%S).png"
+        # -o strips the macOS window shadow so the framing stays tight when
+        # diffing successive captures. Drop -o (or wrap with `task screenshot
+        # -- --shadow`) if you want the framed look.
+        screencapture -o -l "$WID" "$OUT"
+        echo "$OUT"
+
+  dev:manual-test:
+    desc: Build testagent, re-seed data, start dev server (for manual testing)
+    cmds:
+      - task: build:testagent
+      - task: seed:testdata
+      - task: dev
+
+  ci:
+    desc: Run all CI checks in sequence
+    cmds:
+      - task: generate:proto
+      - task: lint
+      - task: lint:proto
+      - task: lint:frontend
+      - task: test
+      - task: build
+
+  install:frontend:
+    desc: Install frontend deps
+    dir: frontend
+    cmd: npm install
+
+  setup:
+    desc: First-time project setup
+    cmds:
+      - go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - task: install:frontend

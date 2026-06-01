@@ -1,0 +1,2764 @@
+:root {
+  font-family: 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Folio palette */
+  --bg: #191714;
+  --surface: #211e1a;
+  --fg: #e8dfd0;
+  --fg-muted: #7d7060;
+  --accent: #c8883a;
+  --success: #6aaa6a;
+  --warning: #d4a030;
+  --danger: #c45c4a;
+  /* Structural helpers derived from the palette */
+  --border: #2e2b27;
+  --surface-hover: #2a2722;
+
+  color: var(--fg);
+  background-color: var(--bg);
+  /* Height reserved at the top of the app for navigation chrome
+     (home / orchestrator / new-idea buttons + view-actions slot + the
+     route-aware title). Session chips and the pending-review chip
+     moved to .app-footer in the bottom-tabs reframe. Views compute
+     their viewport fill against this so floating content can't
+     collide with the topbar. */
+  --app-topbar-height: 32px;
+  /* Height reserved when the orchestrator drawer is open. The drawer
+     toggles this from 0 → its open height by setting the variable on
+     :root; views fold it into their `100vh - …` calc so they don't
+     extend below the visible area when the drawer pushes them down. */
+  --app-drawer-height: 0px;
+  /* Height reserved at the bottom of the app for the persistent
+     footer: session chip strip + pending-review chip + version /
+     caffeinate. Counterpart to --app-topbar-height — views'
+     viewport-fill calcs subtract both so content can't slip under
+     the footer. */
+  --app-footer-height: 32px;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+/* App-level top bar: navigation buttons on the left
+   (home / orchestrator / new-idea), per-view actions slot, and the
+   route-aware title. Session chips and pending-review chip moved
+   to .app-footer in the bottom-tabs reframe.
+   No bottom border — the topbar and main pane share the same
+   background, so the boundary reads as continuous chrome. When the
+   orchestrator drawer is open, *its* bright bottom border + shadow do
+   the visual separation from main below it. */
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  height: var(--app-topbar-height);
+  /* Left padding clears the macOS traffic lights (close/min/max) since
+     we run with mac.TitleBarHidden + FullSizeContent — content extends
+     under a transparent title bar so the topbar sits in the same row
+     as the lights. The padding flips to 12px in fullscreen (lights
+     are hidden by macOS) via body[data-fullscreen] below. Window
+     drag uses Wails's native --wails-draggable property (which the
+     v2 runtime scans the DOM for); inheritance covers descendants,
+     so we only opt interactive children back out below. user-select:
+     none stops chip / title text from capturing the mouse-down as a
+     text selection, which would otherwise swallow the drag-start. */
+  padding: 0 12px 0 80px;
+  background: var(--bg);
+  box-sizing: border-box;
+  gap: 12px;
+  --wails-draggable: drag;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+body[data-fullscreen] .app-topbar {
+  /* Native fullscreen hides the traffic lights — reclaim the 80px
+     left pad so the home/orchestrator/+ cluster scoots flush. */
+  padding-left: 12px;
+}
+
+/* Buttons / chips / inputs inside the topbar opt out of the drag
+   region so clicks register as clicks, not drag-starts. The
+   --wails-draggable property cascades, so interactive descendants
+   (chip text spans, button icons) inherit no-drag automatically. */
+.app-topbar button,
+.app-topbar a,
+.app-topbar select,
+.app-topbar input,
+.app-topbar [role="button"] {
+  --wails-draggable: no-drag;
+}
+
+/* Footer chrome (session chips, review chip, sleep toggle) is
+   interactive — exempt from the draggable region so click + drag
+   doesn't move the window. */
+.app-footer button,
+.app-footer a,
+.app-footer [role="button"],
+.app-footer .global-session-bar,
+.app-footer .pending-reviews-bar {
+  --wails-draggable: no-drag;
+}
+
+/* "ideate" wordmark — Geist 500, tracked wide. Sits before the icon
+   buttons as a static brand anchor. Excluded from drag region via the
+   topbar's interactive-child rule above. */
+.app-wordmark {
+  font-family: 'Geist Sans', -apple-system, sans-serif;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--fg);
+  letter-spacing: 0.08em;
+  padding-right: 6px;
+  --wails-draggable: no-drag;
+}
+
+.app-topbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* The view-actions slot is a portal target. CSS-only logic for the
+   separator and slot visibility avoids a render-cycle dependency
+   between the topbar (parent) and the consumer view (children of
+   <Routes/>): when the view's TopbarActions component portals JSX
+   in, :empty turns false and both the slot + the leading separator
+   light up; when the view unmounts, the slot empties and they hide. */
+.app-topbar-view-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.app-topbar-view-actions:empty {
+  display: none;
+}
+
+.app-topbar-view-actions button {
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.app-topbar-view-actions button:hover {
+  color: var(--fg);
+  background: var(--surface);
+}
+
+.app-topbar-view-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Route-aware title: flows inline after the view-actions slot inside
+   .app-topbar-left, with a leading separator that matches the
+   view-actions border-left. Always rendered (falls back to "Ideate")
+   so a single separator between the home cluster and the title is
+   consistent across routes; when view-actions is also populated, the
+   user reads home-cluster | view-actions | title with two
+   separators. */
+.app-topbar-title {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-topbar-title-text {
+  color: #ccc;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.app-home,
+.app-orchestrator,
+.app-new-idea {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+.app-home:hover,
+.app-orchestrator:hover,
+.app-new-idea:hover {
+  color: var(--fg);
+  background: var(--surface);
+}
+
+.app-orchestrator:disabled {
+  /* Pinned-on-home state — keep the pressed look but neuter pointer
+     interaction so clicks don't no-op against the user's mental model. */
+  opacity: 1;
+  cursor: default;
+}
+
+.app-orchestrator.open {
+  color: var(--fg);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Orchestrator drawer: top drawer that sits between .app-topbar and .app-main
+   when open, pushing main content down. Hosts the workspace-wide orchestrator
+   session (see OrchestratorDrawer.tsx). */
+.orchestrator-drawer {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  height: var(--app-drawer-height);
+  background: var(--bg);
+  /* Top hairline against the topbar — without it the topbar's
+     dark-grey background and the drawer's terminal content blend
+     visually. Bottom seam is the half-opacity brand blue plus a
+     soft drop shadow tying the drawer to the .current chip + the
+     pressed Notebook button. */
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+}
+
+.orchestrator-drawer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.orchestrator-drawer-title {
+  font-weight: 600;
+  color: #ccc;
+  margin-right: auto;
+}
+
+.orchestrator-drawer-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #888;
+}
+
+.orchestrator-drawer-agent select {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.orchestrator-drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.orchestrator-drawer-close:hover {
+  color: var(--fg);
+  background: var(--surface);
+}
+
+.orchestrator-drawer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.orchestrator-drawer-empty {
+  padding: 16px 12px;
+  color: #888;
+  font-size: 13px;
+}
+
+/* Orchestrator host: wrapper for the orchestrator session's
+   TerminalPanel. Renders only while a surface (drawer or fullscreen)
+   wants it visible — `mode === 'hidden'` returns null in JSX, so
+   there is no offscreen mounted instance. position: fixed positions
+   the terminal at the drawer pushdown slot or fills the /orchestrator
+   pane depending on the .orchestrator-host--<mode> modifier. Sits
+   above main content but below the topbar (z-index < topbar's). */
+.orchestrator-host {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.orchestrator-host--drawer {
+  top: var(--app-topbar-height);
+  height: var(--app-drawer-height);
+}
+
+.orchestrator-host--fullscreen {
+  top: var(--app-topbar-height);
+  bottom: var(--app-footer-height);
+}
+
+/* In-app confirm dialog. Backs requestConfirm/useDirtyGuard now that
+   window.confirm is unreliable in Wails WKWebView. Same visual shape
+   as the close-guard dialog. */
+.confirm-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.confirm-dialog {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  max-width: 440px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.45);
+}
+
+.confirm-dialog p {
+  color: var(--fg);
+  margin: 0 0 16px 0;
+  line-height: 1.45;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Drag handle on the drawer's south edge. Thin grab strip overhanging
+   the bottom hairline; cursor changes signal it's resizable. */
+.orchestrator-host-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 6px;
+  cursor: row-resize;
+  z-index: 60;
+}
+
+.orchestrator-host-resize:hover,
+.orchestrator-host-resize:active {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Full-screen orchestrator route. The host overlays this region via
+   .orchestrator-host--fullscreen; this view exists mainly to host the
+   collapse affordance and to render an empty-state when no session
+   has been started yet. */
+.orchestrator-fullscreen {
+  position: relative;
+  height: calc(100vh - var(--app-topbar-height) - var(--app-drawer-height) - var(--app-footer-height));
+  display: flex;
+  flex-direction: column;
+}
+
+/* Floating overlay button shared by drawer (expand) and full-screen
+   (collapse). Top-right of the surface, semi-transparent at rest,
+   solid on hover. Sits above the host (.orchestrator-host z-index 50)
+   so clicks land on the button, not the terminal. */
+.orchestrator-mode-overlay {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(26, 26, 26, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: #888;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.orchestrator-mode-overlay:hover {
+  color: var(--fg);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+/* Main content area sits below the sticky topbar (and the orchestrator drawer
+   when it's open). Views that need the full viewport size against against
+   the reserved topbar height (see calc() uses on .dashboard, .review-
+   container, etc.). */
+.app-main {
+  display: flex;
+  flex-direction: column;
+}
+
+/* #root is intentionally padding-less — full-bleed views (review, session,
+   markdown-review) get the whole viewport, padded views (.dashboard,
+   .idea-detail, .idea-form) opt in via their own padding + border-box. */
+
+h1 {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+p {
+  color: #888;
+  margin: 0;
+}
+
+/* Dashboard. Height-bounded + overflow:auto so scrolling the idea list
+   scrolls inside the dashboard pane, not the document — without this the
+   orchestrator drawer (in normal flow above .app-main) scrolls out of view
+   as the user reaches the bottom of the list. Mirrors .idea-detail. */
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--app-topbar-height) - var(--app-drawer-height) - var(--app-footer-height));
+  overflow-y: auto;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+/* Global app footer — version + uptime strip pinned to the bottom of
+   every view. Sticky bottom (mirrors .app-topbar's sticky top) so it
+   stays visible while the user scrolls long content. Reserved height
+   via --app-footer-height keeps it out of view layout. */
+.app-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--app-footer-height);
+  /* Asymmetric padding: the caffeinate button on the right is a
+     22px square with no internal padding, so 16px of footer
+     right-padding sits its icon ~16px from the screen edge. The
+     leftmost chip carries its own 8px internal left padding, so
+     halving the footer's left padding to 8px brings the chip's
+     text to the same ~16px from the screen edge. */
+  padding: 0 16px 0 8px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  /* Inherit the system font from :root — session chip + review chip
+     text moved here from the topbar and they're proper names, not
+     numeric data. The system zone re-opts into monospace below for
+     the version / uptime spans where mono columns still earn it. */
+  font-size: 12px;
+  color: #666;
+  box-sizing: border-box;
+}
+
+/* Four-zone footer layout (bottom-tabs reframe, Phase A).
+     overflow | tabs | alerts | system
+   Tabs zone grows to fill the gap; everything else flex-shrinks to
+   content. Empty zones don't add gap because they have no children.
+   Phase B turns .app-footer-overflow into the upward-expanding +N
+   stack; for Phase A it's an empty placeholder reserving the slot. */
+.app-footer-overflow {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.app-footer-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* No overflow:hidden — chips are already fixed-width (160px) so
+     they can't spill, and clipping the tabs zone would also clip the
+     upward-expanding overflow popover that lives inside it. */
+}
+
+.app-footer-alerts {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.app-footer-system {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  /* Monospace earns its keep here — version / uptime are numeric and
+     read better with column alignment. The rest of the footer (chips
+     + alerts) inherits the system font set on :root. */
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Sleep-inhibitor toggle in the footer. Three visual states:
+     .disabled — off (default on every app start). Strong dim.
+     .idle     — on but no busy session, so OS can still sleep.
+     .held     — on AND a session is currently working; caffeinate
+                 subprocess is holding the OS awake. Accent color +
+                 a pulse so the user can tell at a glance. */
+.app-sleep-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #666;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.app-sleep-toggle:hover {
+  background: var(--surface);
+  border-color: var(--border);
+  color: #aaa;
+}
+
+.app-sleep-toggle.disabled {
+  color: #555;
+}
+
+.app-sleep-toggle.idle {
+  color: #b5b5b5;
+}
+
+.app-sleep-toggle.held {
+  color: #f0c674;
+  background: rgba(240, 198, 116, 0.08);
+  border-color: rgba(240, 198, 116, 0.25);
+}
+
+.app-sleep-toggle.held::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f0c674;
+  margin: -16px 0 0 14px;
+  animation: app-sleep-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes app-sleep-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Review view */
+.review-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--app-topbar-height) - var(--app-drawer-height) - var(--app-footer-height));
+  overflow: hidden;
+}
+
+.review-empty {
+  padding: 24px;
+}
+
+.review-empty pre {
+  background: var(--surface);
+  padding: 12px 16px;
+  border-radius: 4px;
+  color: var(--fg);
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.review-error {
+  color: var(--danger);
+}
+
+.review-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.review-toolbar-repo {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.review-toolbar-ref {
+  color: #888;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.review-toolbar-count {
+  color: #888;
+  font-size: 13px;
+  margin-left: auto;
+}
+
+.toggle-btn {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toggle-btn:hover {
+  background: var(--surface-hover);
+}
+
+/* Icon-only variant — applied alongside any button class so the icon
+   centers with consistent square padding. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+}
+
+/* Destructive icon-only stop button — solid red fill. */
+.toggle-btn.btn-stop {
+  background: var(--danger);
+  color: #fff;
+  border-color: transparent;
+}
+
+.toggle-btn.btn-stop:hover {
+  background: color-mix(in srgb, var(--danger) 85%, #000);
+}
+
+.toggle-btn.btn-stop:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.review-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.review-toolbar-comments {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+/* Submit Review uses the brand blue — same primary affordance as the
+   dashboard's Start button and the topbar's pressed orchestrator seam.
+   Cancel Review drops back to the plain .toggle-btn shell so the
+   review surface speaks the same button language as the rest of the
+   app. Saturated red is reserved for `Stop session` only. */
+.review-submit-btn {
+  background: var(--accent) !important;
+  color: white !important;
+  border-color: var(--accent) !important;
+}
+
+.review-submit-btn:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #000) !important;
+  border-color: #4a8ce5 !important;
+}
+
+.review-summary-bar {
+  padding: 4px 12px;
+  background: #222;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Constrain the summary textarea to the same readable column width
+   as the markdown editor (.markdown-review-editor .milkdown) and
+   center it. Full-screen-wide textareas read as a giant pill on
+   ultrawide displays — the prose is short and benefits from the
+   same line length as the doc it's reviewing. */
+.review-summary-input {
+  display: block;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 36px;
+}
+
+.review-comment-widget {
+  padding: 8px 12px;
+  background: #1e2a38;
+  border: 1px solid #3a5a8a;
+  border-radius: 4px;
+  margin: 4px 8px;
+}
+
+.review-comment-input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: monospace;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.review-comment-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  justify-content: flex-end;
+}
+
+.file-tree-comment-badge {
+  margin-left: auto;
+  padding: 1px 6px;
+  background: #3a5a8a;
+  color: #fff;
+  border-radius: 10px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Modeled on GitHub dark-mode PR review comments for restraint:
+   neutral subtle bg + thin border, accent ribbon on the left in our
+   brand blue, near-white body text. !important on color is required
+   because @git-diff-view applies `.diff-line-extend-wrapper * {
+   color: initial }`, which would otherwise reset our text to
+   user-agent black on this dark surface. */
+.review-comment-display {
+  padding: 8px 12px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  margin: 4px 8px;
+  font-size: 13px;
+  color: #e6edf3 !important;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.review-comment-body {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #e6edf3 !important;
+}
+
+.review-comment-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.review-comment-edit,
+.review-comment-remove {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.review-comment-edit:hover {
+  color: var(--accent);
+}
+
+.review-comment-remove:hover {
+  color: #e55;
+}
+
+/* Edit-mode swap: the .review-comment-display flexbox renders a
+   textarea + actions stacked instead of body + remove-x. Reset
+   align-items so the textarea fills the row. */
+.review-comment-display:has(.review-comment-input) {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.btn-cancel {
+  background: var(--surface-hover) !important;
+}
+
+/* File tree sidebar */
+.file-tree {
+  width: 250px;
+  min-width: 250px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.file-tree-item:hover {
+  background: var(--surface);
+}
+
+.file-tree-item.selected {
+  background: var(--surface);
+  color: var(--fg);
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
+
+.file-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-tree-status {
+  font-family: monospace;
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.file-tree-status-added {
+  color: var(--success);
+}
+
+.file-tree-status-modified {
+  color: var(--warning);
+}
+
+.file-tree-status-deleted {
+  color: var(--danger);
+}
+
+.file-tree-status-renamed {
+  color: var(--accent);
+}
+
+/* Resize handle */
+.resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: var(--accent);
+}
+
+/* Diff panel */
+.diff-panel {
+  flex: 1;
+  overflow: auto;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Session view */
+.session-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--app-topbar-height) - var(--app-drawer-height) - var(--app-footer-height));
+  overflow: hidden;
+}
+
+.session-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.session-toolbar-name {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.session-toolbar-status {
+  font-size: 13px;
+  color: #888;
+}
+
+.session-toolbar-status.running {
+  color: var(--success);
+}
+
+.session-toolbar-status.exited {
+  color: var(--warning);
+}
+
+.session-toolbar-status.stopped {
+  color: var(--warning);
+}
+
+.terminal-container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 2px;
+  background: var(--bg);
+  /* Reserve the focus-indicator outline so adding it later doesn't
+     shift the terminal layout (xterm cares about content size). */
+  box-shadow: inset 0 0 0 2px transparent;
+  transition: box-shadow 100ms ease;
+}
+
+/* Focus indicator. Multiple terminals can be visible at once
+   (orchestrator + idea session); a subtle brand-blue inset border on the
+   one xterm currently owns shows which will receive keystrokes. */
+.terminal-container.terminal-focused {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* Start session form */
+.session-start {
+  padding: 24px;
+  max-width: 500px;
+}
+
+.session-start h1 {
+  margin-bottom: 16px;
+}
+
+.session-start label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #888;
+}
+
+.session-start input,
+.session-start select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.session-start input:focus,
+.session-start select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.session-start button {
+  margin-top: 16px;
+  padding: 8px 20px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.session-start button:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #000);
+}
+
+.session-start button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.session-error {
+  color: var(--danger);
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.session-already-running {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Banner background + bottom-border match the topbar's pending-review
+   chip color — both surfaces signal the same "pending review" state
+   and now share the same amber accent. */
+.session-review-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  font-size: 13px;
+}
+
+.session-review-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--warning);
+}
+
+.session-review-banner-text {
+  flex: 1;
+}
+
+.session-already-running p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.session-already-running button {
+  align-self: flex-start;
+}
+
+/* Idea list */
+.idea-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.idea-list-header h1 {
+  margin: 0;
+}
+
+.idea-list-empty {
+  padding: 32px 0;
+  text-align: center;
+}
+
+/* Onboarding surface shown when there are no ideas yet. Centered
+   vertically and horizontally in the dashboard container. */
+.idea-list-onboarding {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 24px;
+}
+
+.onboarding-wordmark {
+  font-family: 'Geist Sans', -apple-system, sans-serif;
+  font-weight: 500;
+  font-size: 48px;
+  color: var(--fg);
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.onboarding-tagline {
+  font-family: 'Newsreader', Georgia, serif;
+  font-style: italic;
+  font-size: 18px;
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+.onboarding-pitch {
+  font-size: 14px;
+  color: var(--fg-muted);
+  max-width: 380px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.onboarding-slugs {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.onboarding-slug {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
+.onboarding-cta {
+  margin-top: 8px;
+}
+
+.idea-list-archived {
+  margin-top: 16px;
+}
+
+.btn-toggle-archived {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.btn-toggle-archived:hover {
+  color: #888;
+}
+
+.idea-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* CardShell — shared visual primitive for every list-style surface
+   (dashboard idea cards, footer popover session cards, future
+   Cmd+K palette). Owns the outer container, hover, and the
+   header/summary/body/meta slot layout. Consumers extend via
+   modifier classes (.idea-card, .session-card) for context-specific
+   sizing/coloring. */
+.card-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  color: var(--fg);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.card-shell[role='button'] {
+  cursor: pointer;
+}
+
+.card-shell[role='button']:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+.card-shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-shell-summary {
+  margin: 6px 0 0 0;
+  color: #b0b0b0;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-shell-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #888;
+  align-items: center;
+}
+
+/* Idea card — dashboard variant of CardShell.
+   Left-rail: 3px border-left encodes lifecycle status at a glance.
+   Running sessions get an additional box-shadow glow. */
+.idea-card--running {
+  border-left: 3px solid var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent),
+              0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent);
+  padding-left: 14px; /* compensate for the extra 2px left border */
+}
+
+.idea-card--active {
+  border-left: 3px solid var(--fg-muted);
+  padding-left: 14px;
+}
+
+.idea-card--paused {
+  border-left: 3px solid color-mix(in srgb, var(--fg-muted) 50%, transparent);
+  padding-left: 14px;
+}
+
+.idea-card--archived {
+  border-left: 3px solid color-mix(in srgb, var(--fg-muted) 30%, transparent);
+  opacity: 0.7;
+  padding-left: 14px;
+}
+
+/* Groups the lifecycle-status icon + idea name as a single left-aligned
+   unit so the status badge stays anchored to the right of the header. */
+.idea-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.idea-card-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Session indicator on the card — visual badge only; the card body
+   is the click target for session navigation. */
+.idea-card-session-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  margin-left: auto;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.idea-card-session-badge.running .idea-card-session-label {
+  color: #ccc;
+}
+
+.idea-card-session-badge.completed .idea-card-session-label {
+  color: #888;
+}
+
+/* Crash-recovery toast — fires once on app startup after auto-resume. */
+.crash-recovery-toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 360px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.crash-recovery-toast-body {
+  flex: 1;
+}
+
+.crash-recovery-toast-body strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #ccc;
+}
+
+.crash-recovery-toast-body ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crash-recovery-toast-body li {
+  padding: 2px 0;
+}
+
+.crash-recovery-toast-body .btn-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  text-align: left;
+}
+
+.crash-recovery-toast-body .btn-link:hover {
+  text-decoration: underline;
+}
+
+.crash-recovery-toast-dismiss {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.crash-recovery-toast-dismiss:hover {
+  color: var(--fg);
+}
+
+/* Close-guard dialog: modal that fires when BeforeClose blocks because a
+   session is non-idle. Click "Stop & Quit" → ForceQuit; "Cancel" → dismiss. */
+.close-guard-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-guard-dialog {
+  max-width: 480px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  font-size: 14px;
+  color: var(--fg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.close-guard-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  color: var(--warning);
+}
+
+.close-guard-dialog p {
+  margin: 8px 0;
+}
+
+.close-guard-dialog ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+
+.close-guard-dialog li {
+  margin: 4px 0;
+}
+
+.close-guard-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Global session bar: lives in the .app-footer's tabs zone. Holds
+   exactly one chip — the session route the user is currently on.
+   Every running session (including that one) appears in the upward-
+   expanding popover anchored to the overflow pill on the left. */
+.global-session-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.global-session-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+  /* Unconstrained width: the single chip is the current-session
+     anchor, not a tab in a multi-tab strip, so let it size to its
+     label. Long names still wrap-suppressed for one-line layout. */
+  white-space: nowrap;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.global-session-chip:hover {
+  background: var(--surface-hover);
+  border-color: #555;
+}
+
+.global-session-chip-idea {
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.global-session-chip-agent {
+  color: #888;
+  font-size: 11px;
+}
+
+/* Both `waiting` and `reviewing` are attention-needed states with the
+   same priority slot in GlobalSessionBar.partition. They share a
+   single warning color so the user reads "needs your eyes" without
+   having to remember which shade means which. */
+.global-session-chip.waiting,
+.global-session-chip.reviewing {
+  border-color: var(--warning);
+}
+
+/* The chip representing the session route the user is currently viewing.
+   Stronger visual treatment so it reads as "you are here" — pinned
+   rightmost by the partition logic (browser-tab convention). */
+.global-session-chip.current {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Overflow pill: appears when hidden.length > 0. Click toggles a
+   popover that opens UPWARD from the bottom-left edge of the footer
+   (the "stack" — older sessions accumulate here as new tabs push
+   them off the left). Glows when an attention-needed session has
+   fallen into the stack, since attention is no longer force-visible. */
+.global-session-overflow {
+  position: relative;
+}
+
+.global-session-overflow.attention .global-session-more {
+  border-color: var(--warning);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 40%, transparent);
+}
+
+.global-session-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.global-session-more:hover,
+.global-session-more[aria-expanded='true'] {
+  background: var(--surface-hover);
+  border-color: #555;
+  color: var(--fg);
+}
+
+/* Anchored to the BOTTOM of the +N button and expands UPWARD —
+   stack grows above the footer rather than dropping below it (which
+   would go off-screen since the footer sits at the page bottom).
+   Newest-at-top sort order (matches the dashboard): the React array
+   is sorted newest-first and rendered with `column` so the visual
+   top of the popover is the most-recently-active session and the
+   oldest sits next to the +N pill. */
+.global-session-popover {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  width: 420px;
+  /* Cap the popover at most of the viewport so long session lists
+     scroll inside the popover instead of spilling above the
+     window's top edge. 4px leaves a hair of breathing room at the
+     screen top; the footer height + 8px pad keeps the popover
+     clear of the +N pill below it. */
+  max-height: calc(100vh - var(--app-footer-height) - var(--app-topbar-height) - 8px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 901;
+}
+
+/* Session card — popover variant of CardShell. Same slots, denser
+   padding and a darker background so the popover reads as nested
+   chrome rather than primary content. */
+.session-card {
+  padding: 8px 10px;
+  background: #1f1f1f;
+  border-color: var(--border);
+  font-size: 12px;
+}
+
+.session-card.current {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.session-card.waiting,
+.session-card.reviewing {
+  border-color: var(--warning);
+}
+
+.session-card .card-shell-summary {
+  font-size: 11px;
+  color: #aaa;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.session-card .card-shell-meta {
+  margin-top: 2px;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.session-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.session-card-name {
+  font-weight: 500;
+  color: #f0f0f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-card-agent {
+  color: #aaa;
+}
+
+.session-card-current-tag {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+
+/* Short repo-name list. Sized to one line; overflow truncates with
+   an ellipsis (the title attribute carries the full list for hover). */
+.idea-card-repos {
+  font-size: 11px;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pending reviews bar: lives in the footer's .app-footer-alerts
+   zone, sticky-right of the session-chip flow so it's never pushed
+   into the overflow stack. Renders a chip per pending review (diff
+   or markdown). Shares the chip style language with sessions but
+   uses a distinct accent so the user can tell at a glance which
+   strip holds open reviews vs sessions. */
+.pending-reviews-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Pending-review chip uses the same amber accent as
+   .global-session-chip.reviewing — a session blocked on a review and
+   the bar entry for that review are the same concept, so they read
+   the same. The kind (diff vs markdown) is encoded in the chip's
+   leading icon, not in the border color. */
+.pending-review-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--warning);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pending-review-chip:hover {
+  background: var(--surface-hover);
+  border-color: #555;
+  border-left-color: var(--warning);
+}
+
+.pending-review-chip-label {
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-review-chip-age {
+  color: #888;
+  font-size: 11px;
+}
+
+/* Status badges */
+.status-badge {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.status-badge.active {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.status-badge.paused {
+  color: var(--warning);
+  background: rgba(255, 152, 0, 0.12);
+}
+
+.status-badge.archived {
+  color: #888;
+  background: rgba(136, 136, 136, 0.12);
+}
+
+/* Session + review status pills share the idea-status pill treatment
+   so every "this thing is in state X" affordance reads as one family.
+   Greens mean "good terminal state" (completed sessions, submitted
+   reviews); amber is in-progress / pending; red is failed; grey is
+   benign-terminal (cancelled / archived). */
+.status-badge.running,
+.status-badge.complete,
+.status-badge.completed {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.status-badge.pending {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.status-badge.cancelled,
+.status-badge.stopped {
+  color: #888;
+  background: rgba(136, 136, 136, 0.12);
+}
+
+.status-badge.failed {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* Buttons */
+.btn-primary {
+  padding: 8px 20px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #000);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  padding: 8px 16px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-secondary:hover {
+  background: var(--surface-hover);
+}
+
+.btn-danger {
+  padding: 8px 20px;
+  background: var(--danger);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--danger) 85%, #000);
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+.btn-back:hover {
+  background: var(--surface);
+  color: #7eb6ff;
+}
+
+/* Idea detail */
+.idea-detail {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--app-topbar-height) - var(--app-drawer-height) - var(--app-footer-height));
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.idea-detail-loading,
+.idea-detail-error {
+  padding: 24px;
+  color: #888;
+}
+
+.idea-detail-error {
+  color: var(--danger);
+}
+
+.idea-detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.idea-detail-name {
+  font-size: 20px;
+  margin: 0;
+}
+
+.idea-detail-slug {
+  font-family: monospace;
+  font-size: 13px;
+  color: #888;
+}
+
+.idea-detail-created {
+  font-size: 13px;
+  color: #888;
+}
+
+.idea-detail-toolbar-spacer {
+  flex: 1;
+}
+
+.idea-detail-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.idea-sidebar {
+  width: 200px;
+  min-width: 200px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Title-case section header — drops the dev-tool uppercase/tracking
+   feel for a softer readable label that fits the rest of the app's
+   typography. */
+.idea-sidebar-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaa;
+  margin-bottom: 4px;
+}
+
+.idea-sidebar-item {
+  padding: 4px 8px;
+  font-size: 13px;
+  color: #ccc;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Pending-markdown-review dot on a file row in the idea sidebar.
+   Same lucide Circle the repo "dirty" indicator uses, recolored to
+   the accent the topbar reviews chip already uses, so the visual
+   language stays consistent. */
+.idea-file-review-pending {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: #f0c674;
+  vertical-align: middle;
+}
+
+.idea-sidebar-item:hover {
+  background: var(--surface);
+}
+
+.idea-sidebar-item.selected {
+  background: var(--surface);
+  color: var(--fg);
+  border-left: 2px solid var(--accent);
+  padding-left: 6px;
+}
+
+.idea-sidebar-item.repo {
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.idea-sidebar-item.repo .repo-name {
+  color: var(--accent);
+}
+
+.idea-sidebar-item.repo .repo-at {
+  color: #555;
+}
+
+.idea-sidebar-item.repo .repo-branch {
+  color: #888;
+  font-style: italic;
+}
+
+.idea-sidebar-item.repo .repo-dirty {
+  display: inline-flex;
+  align-items: center;
+  color: #d97757;
+}
+
+.idea-sidebar-item.repo .repo-ahead,
+.idea-sidebar-item.repo .repo-behind {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 11px;
+  color: #888;
+}
+
+.idea-sidebar-item.repo .repo-action {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.idea-sidebar-item.repo .repo-action:hover {
+  color: var(--fg);
+}
+
+.repo-tree .repo-child,
+.idea-sidebar-item.repo-child {
+  padding-left: 20px;
+}
+
+.idea-sidebar-item.agent {
+  color: #b8860b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.idea-sidebar-item.agent .agent-suffix {
+  color: #555;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.idea-sidebar-item.agent .agent-action {
+  margin-left: auto;
+  color: #666;
+  font-size: 11px;
+}
+
+.idea-sidebar-item.agent:hover .agent-action {
+  color: var(--fg);
+}
+
+.idea-sidebar-item.session-history {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #888;
+  padding-left: 20px;
+}
+
+.idea-sidebar-item.session-history.running {
+  color: #ccc;
+}
+
+.repo-tree .session-history {
+  padding-left: 36px;
+}
+
+.idea-sidebar-item.resource {
+  color: #888;
+}
+
+.idea-sidebar-empty {
+  font-size: 12px;
+  color: #666;
+  padding: 4px 8px;
+}
+
+/* Session list in sidebar */
+.idea-sidebar-section-title .btn-small {
+  background: none;
+  border: 1px solid #555;
+  color: #888;
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.idea-sidebar-section-actions {
+  float: right;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.idea-sidebar-section-title .btn-small:hover {
+  color: var(--fg);
+  border-color: #888;
+}
+
+/* SessionStatusIcon — wraps a lucide icon in a span keyed by the session
+   state. Color comes via `currentColor` on the inner SVG. */
+.session-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  vertical-align: middle;
+  color: #888;
+  line-height: 0;
+}
+
+/* M14 activity states for a running session. Idle (running but not
+   currently working) is blue to differentiate from active (green +
+   glow) so a glance at the sidebar tells you which sessions are
+   actually doing work. */
+.session-icon.idle {
+  color: var(--accent);
+}
+
+.session-icon.active {
+  color: var(--success);
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--success) 60%, transparent));
+}
+
+.session-icon.waiting,
+.session-icon.reviewing {
+  color: var(--warning);
+  animation: session-waiting-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes session-waiting-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.session-icon.completed {
+  color: #666;
+}
+
+.session-icon.stopped {
+  color: #888;
+}
+
+.session-icon.failed {
+  color: #d97757;
+}
+
+.session-icon.orphaned {
+  color: #666;
+  opacity: 0.7;
+}
+
+.session-icon.dormant {
+  color: #8a8a8a;
+}
+
+/* IdeaStatusIcon — mirrors .session-icon: wraps a lucide icon in a span
+   keyed by the idea's lifecycle status. Colors match the .status-badge
+   palette so the badge and icon read as the same signal. */
+.idea-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  color: #888;
+  line-height: 0;
+}
+
+.idea-icon.active {
+  color: var(--success);
+}
+
+.idea-icon.paused {
+  color: var(--warning);
+}
+
+.idea-icon.archived {
+  color: #888;
+}
+
+.idea-sidebar-item.session {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.idea-sidebar-item.session .session-agent {
+  color: #ccc;
+  font-size: 12px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idea-sidebar-item.session.completed .session-agent,
+.idea-sidebar-item.session.stopped .session-agent,
+.idea-sidebar-item.session.failed .session-agent {
+  color: #888;
+}
+
+.idea-sidebar-item.session .session-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.sessions-section .idea-sidebar-section-title {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sessions-section .idea-sidebar-section-title:hover {
+  color: #ccc;
+}
+
+.sessions-section .idea-sidebar-section-title:focus-visible {
+  outline: 1px solid #4a8ce5;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.sessions-section-chevron {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  color: #666;
+}
+
+.sessions-section .idea-sidebar-section-actions {
+  margin-left: auto;
+}
+
+/* Session metadata (completed session detail) */
+.session-metadata {
+  padding: 24px;
+}
+
+.session-metadata dl {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.session-metadata dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.session-metadata dd {
+  margin: 0;
+  font-size: 14px;
+  color: #ccc;
+}
+
+.session-metadata-path {
+  font-family: monospace;
+  font-size: 12px;
+  color: #888;
+  word-break: break-all;
+}
+
+.idea-main {
+  flex: 1;
+  overflow-y: auto;
+  padding-left: 16px;
+  min-width: 0;
+}
+
+.idea-main-file {
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 16px;
+  margin: 0;
+  overflow-x: auto;
+  /* Milkdown / Crepe brings its own typography for prose. The container
+     here just provides the framing background; font/color come from the
+     editor theme. */
+}
+
+.idea-main-empty {
+  color: #888;
+  padding: 16px 0;
+}
+
+/* Idea form */
+.idea-form {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.idea-form h1 {
+  margin-bottom: 12px;
+}
+
+.idea-form-hint {
+  margin: 0 0 20px 0;
+  padding: 10px 12px;
+  background: #222;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.idea-form-hint code {
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #ccc;
+}
+
+.idea-form label {
+  display: block;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #888;
+}
+
+.idea-form input,
+.idea-form select,
+.idea-form textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.idea-form textarea {
+  font-family: monospace;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.idea-form input:focus,
+.idea-form select:focus,
+.idea-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.idea-form-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.idea-form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.idea-form-danger-zone {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.delete-confirm {
+  background: #2a1a1a;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.delete-confirm-message {
+  margin: 0 0 12px 0;
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.idea-form-loading {
+  padding: 24px;
+  color: #888;
+}
+
+/* History panel */
+.history-panel {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+}
+
+.history-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #888;
+  user-select: none;
+}
+
+.history-panel-header:hover {
+  color: var(--fg);
+}
+
+.history-panel-toggle {
+  font-size: 10px;
+  width: 14px;
+}
+
+.history-panel-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.history-panel.expanded .history-panel-body {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.history-loading,
+.history-empty {
+  padding: 8px 0;
+  font-size: 13px;
+  color: #666;
+}
+
+.history-event {
+  display: flex;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-event-ts {
+  font-family: monospace;
+  color: #666;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.history-event-type {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.history-event-actor {
+  color: var(--accent);
+}
+
+.history-event-fields {
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Newsreader serif applied to the markdown-review prose surface only.
+   Geist Mono for code blocks inside; Newsreader italic for prose body. */
+.markdown-review-editor .milkdown {
+  font-family: 'Newsreader', Georgia, 'Times New Roman', serif;
+}
+
+.markdown-review-editor .milkdown code,
+.markdown-review-editor .milkdown pre {
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Markdown review (M4d) — Milkdown editor in a full-bleed layout that
+   mirrors .review-container so the toolbar/summary chrome aligns. */
+
+.markdown-review-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--app-topbar-height) - var(--app-drawer-height) - var(--app-footer-height));
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.markdown-review-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid #333;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.markdown-review-toolbar-file {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.markdown-review-toolbar-hint {
+  color: #888;
+  font-size: 12px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-review-toolbar-hint code {
+  background: var(--bg);
+  border: 1px solid #333;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: 0 2px;
+  font-size: 11px;
+  color: #d0d0d0;
+}
+
+.markdown-review-mark-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.markdown-review-spacer {
+  flex: 1;
+}
+
+.cm-mark-btn {
+  background: var(--surface);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 20px; /* pill shape */
+  padding: 3px 10px 3px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: 'Geist Sans', inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background-color 80ms, border-color 80ms, color 80ms;
+}
+
+.cm-mark-btn:hover {
+  background: var(--surface);
+  border-color: #555;
+}
+
+.cm-mark-btn:active {
+  background: var(--surface-hover);
+}
+
+.cm-mark-btn-insertion {
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  color: #81c784;
+}
+.cm-mark-btn-insertion:hover { border-color: var(--success); }
+
+.cm-mark-btn-deletion {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  color: color-mix(in srgb, var(--danger) 80%, var(--fg));
+}
+.cm-mark-btn-deletion:hover { border-color: var(--danger); color: var(--danger); }
+
+.cm-mark-btn-comment {
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  color: color-mix(in srgb, var(--warning) 80%, var(--fg));
+}
+.cm-mark-btn-comment:hover { border-color: var(--warning); color: var(--warning); }
+
+.markdown-review-error {
+  padding: 8px 16px;
+  background: #3a1a1a;
+  border-bottom: 1px solid #5a2a2a;
+  color: #f88;
+}
+
+.markdown-review-editor {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 24px;
+
+  /* Crepe's frame-dark theme uses --crepe-color-selected: #2f2f2f, which is
+     barely distinguishable from the dark background. Override with a
+     saturated VS-Code-style blue so the user can clearly see what's
+     selected. */
+  --crepe-color-selected: #264f78;
+
+}
+
+/* Crepe's frame-dark theme declares --crepe-color-inline-code: #ff6666 (red)
+   on `.milkdown` itself, which visually collides with our deletion mark and
+   reads as an error. Redeclare on `.milkdown` (not the outer container —
+   .milkdown's own declaration wins over ancestor inheritance) with the
+   muted gray used elsewhere in the palette so inline code and fenced code
+   share a consistent neutral tone. */
+.markdown-review-editor .milkdown {
+  --crepe-color-inline-code: #a9a9a9;
+}
+
+.markdown-review-editor .ProseMirror ::selection,
+.markdown-review-editor .ProseMirror *::selection {
+  background: #264f78;
+}
+
+.markdown-review-source::selection {
+  background: #264f78;
+}
+
+.markdown-review-source {
+  flex: 1;
+  width: 100%;
+  padding: 16px 24px;
+  background: var(--bg);
+  color: var(--fg);
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.markdown-review-editor .milkdown {
+  /* Keeps a reading gutter on wide screens but stops cramping content
+     at 880px. 92vw caps at the viewport on narrow windows; 1400px keeps
+     line length within readable bounds on large monitors. */
+  max-width: min(92vw, 1400px);
+  margin: 0 auto;
+}
+
+/* Comment popover — anchored to the editor caret via Floating UI.
+   Replaces window.prompt for the markdown review's {>>comment<<} button
+   (Wails WKWebView no-ops native prompts). */
+.comment-popover {
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  width: min(360px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.comment-popover-input {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 48px;
+}
+
+.comment-popover-input:focus {
+  outline: none;
+  border-color: #5a8;
+}
+
+.comment-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.comment-popover-hint {
+  flex: 1;
+  font-size: 11px;
+  color: #888;
+}
+
+.btn-tight {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* Cmd+K command palette: centered modal switcher. Backdrop dims
+   the rest of the app; click on it closes. The panel sizes to a
+   comfortable card-list width with a viewport-relative max height
+   so the list scrolls inside the panel instead of off-screen. */
+.command-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.command-palette {
+  width: min(560px, 90vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.command-palette-input {
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+.command-palette-input::placeholder {
+  color: #666;
+}
+
+.command-palette-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.command-palette-empty {
+  padding: 16px;
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+}
+
+/* Section divider that splits navigation targets from commands when
+   the user is typing. Empty-query view never shows commands, so this
+   row only appears mid-search. */
+.command-palette-section {
+  margin: 8px 4px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #888;
+}
+
+/* Wrapper for each row. Doesn't carry visual styling itself — the
+   inner NavRow/CommandRow own their own appearance. Hover styling
+   comes from the inner card / command, not from this wrapper, so
+   mouse hover never reads as a committed selection. */
+.command-palette-row {
+  display: block;
+}
+
+/* Command row: compact one-line affordance distinct from the
+   richer SessionCard nav row, since commands have no summary line
+   or activity dot — just label + optional hint. */
+.command-palette-command {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #1f1f1f;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.command-palette-command:hover {
+  background: var(--surface);
+  border-color: #4a4a4a;
+}
+
+.command-palette-command.selected {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.command-palette-command-icon {
+  display: inline-flex;
+  color: #aaa;
+}
+
+.command-palette-command-label {
+  flex: 1;
+  color: #f0f0f0;
+}
+
+.command-palette-command-hint {
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
