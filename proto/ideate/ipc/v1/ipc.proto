@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package ideate.ipc.v1;
+
+option go_package = "github.com/paultyng/ideate/internal/gen/ideate/ipc/v1;ipcv1";
+
+service IdeateService {
+  // OpenReview navigates the app to the review view, identified either by a
+  // PR reference or by a previously-created agent review ID.
+  rpc OpenReview(OpenReviewRequest) returns (OpenReviewResponse);
+  // GetStatus returns the current status of the running app.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+message OpenReviewRequest {
+  string pr = 1;
+  string repo = 2;
+  string base = 3;
+  string head = 4;
+  string review_id = 5;
+}
+
+message OpenReviewResponse {}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string version = 1;
+  string uptime = 2;
+  // sleep_enabled mirrors the in-app footer toggle; true when the
+  // user has opted in to keep the Mac awake during active sessions.
+  bool sleep_enabled = 3;
+  // sleep_held is true when the OS-level sleep assertion is currently
+  // in effect. Implies sleep_enabled is true AND at least one running
+  // session has activity in {active, waiting}.
+  bool sleep_held = 4;
+}

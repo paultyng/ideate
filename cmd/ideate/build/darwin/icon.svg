@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Warm rounded-rect background: #211e1a, 12% corner radius = 122.88px -->
+  <rect x="0" y="0" width="1024" height="1024" rx="123" ry="123" fill="#211e1a"/>
+  <!-- Italic lowercase 'i' stem in Newsreader style — hand-crafted paths.
+       The stem is a slightly slanted rectangle; italic leans ~12 degrees. -->
+  <!-- Stem body: slanted parallelogram approximating italic 'i' at large size -->
+  <path d="M 448 310 L 530 310 L 576 720 L 494 720 Z" fill="#e8dfd0"/>
+  <!-- Serif at bottom: flat horizontal bar -->
+  <path d="M 440 710 L 590 710 L 590 740 L 440 740 Z" fill="#e8dfd0"/>
+  <!-- Serif at top of stem (small) -->
+  <path d="M 440 300 L 540 300 L 540 320 L 440 320 Z" fill="#e8dfd0"/>
+  <!-- Amber tittle (dot) replacing the standard i-dot.
+       Positioned above the stem, centered slightly right for italic lean. -->
+  <circle cx="570" cy="230" r="62" fill="#c8883a"/>
+</svg>

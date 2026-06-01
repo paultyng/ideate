@@ -1,0 +1,46 @@
+/* CriticMarkup styling — Google-Docs-suggestion-mode treatment.
+   Selectors target the schema-mark/atom-node DOM produced by ./schema.ts:
+   - <ins class="cm-insertion"> wraps inserted text (mark)
+   - <del class="cm-deletion"> wraps deleted text (mark)
+   - <span class="cm-substitution"> wraps the rendered "{~~old~>new~~}" literal
+   - <span class="cm-comment"> wraps the rendered "{>>note<<}" literal */
+
+.cm-insertion {
+  color: #4caf50;
+  text-decoration: underline;
+  text-decoration-color: #4caf50;
+  text-underline-offset: 2px;
+  background: rgba(76, 175, 80, 0.08);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-style: normal;
+}
+
+.cm-deletion {
+  color: #ef5350;
+  text-decoration: line-through;
+  text-decoration-color: #ef5350;
+  background: rgba(239, 83, 80, 0.08);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-style: normal;
+}
+
+.cm-substitution {
+  color: #ffa726;
+  background: rgba(255, 167, 38, 0.1);
+  text-decoration: underline dashed;
+  text-decoration-color: rgba(255, 167, 38, 0.5);
+  text-underline-offset: 2px;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.cm-comment {
+  background: rgba(255, 213, 79, 0.18);
+  color: #ffd54f;
+  border: 1px solid rgba(255, 213, 79, 0.35);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-style: italic;
+}

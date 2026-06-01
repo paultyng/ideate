@@ -1,0 +1,1 @@
+Cancel a pending review previously requested by this session via request_diff_review or request_markdown_review. Use when the agent has changed its mind, the review is no longer relevant, or the user signaled to abandon it. The review's status flips to cancelled, get_*_review_result returns immediately, and the session's reviewing-activity state is cleared.
