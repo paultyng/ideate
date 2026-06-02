@@ -193,6 +193,13 @@ type CommandConfig struct {
 	// CommandConfig so the merged set travels with the command description
 	// if callers need to inspect it; BuildCommand itself does not consume it.
 	Env map[string]string
+	// BinaryPath overrides the resolved claude binary. Empty means BuildCommand
+	// resolves via exec.LookPath("claude") (the production path). Production
+	// callers leave this empty; tests set it to a sentinel so BuildCommand
+	// doesn't depend on the CI runner having a real claude on $PATH. The
+	// bindisco rework (backlog 3c74c629) will populate this from the resolved
+	// discovery result instead of LookPath-ing inside BuildCommand.
+	BinaryPath string
 }
 
 // BuildCommand finds the claude CLI and returns an exec.Cmd with all arguments
@@ -205,9 +212,13 @@ type CommandConfig struct {
 // user runs already has the same trust level. Revisit if Ideate ever sandboxes
 // agents, runs as a service, or supports multi-user.
 func BuildCommand(config CommandConfig) (*exec.Cmd, []string, error) {
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		return nil, nil, fmt.Errorf("claude CLI not found: %w", err)
+	claudePath := config.BinaryPath
+	if claudePath == "" {
+		resolved, err := exec.LookPath("claude")
+		if err != nil {
+			return nil, nil, fmt.Errorf("claude CLI not found: %w", err)
+		}
+		claudePath = resolved
 	}
 
 	args := []string{"-n", config.Name}
