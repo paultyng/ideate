@@ -63,3 +63,17 @@ Thumbs.db
 
 # Claude Code working files
 .reviews/
+
+# Local env files (signing/notarization keys, etc.)
+.env
+.env.local
+.env.*.local
+
+# Stray Apple App Store Connect API keys (proper location is ~/.apple-keys/)
+AuthKey_*.p8
+
+# Stray Apple Developer ID cert exports (proper location is your password manager + ~/.apple-keys/)
+*.p12
+
+# Local release artifacts (.dmg, .app, intermediate signatures)
+dist/

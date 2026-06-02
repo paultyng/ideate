@@ -1,5 +1,7 @@
 version: "3"
 
+dotenv: ['.env']
+
 tasks:
   build:testagent:
     desc: Build the testagent binary from the github.com/paultyng/testagent module (declared via the `tool` directive in go.mod).
@@ -119,7 +121,16 @@ tasks:
     desc: Package signed .app as a DMG (requires create-dmg via Homebrew)
     deps: [release:sign]
     vars:
-      VERSION: '{{.VERSION | default "dev"}}'
+      # Derive from the latest v-tag (sans v-prefix). Same mechanism as
+      # `task build` uses for wails.json productVersion. Env override
+      # supported for local test runs (e.g. VERSION=0.1.0-test).
+      VERSION:
+        sh: test -n "$VERSION" && echo "$VERSION" || (git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+    preconditions:
+      - sh: '[ -n "{{.VERSION}}" ]'
+        msg: 'VERSION must resolve to a non-empty value. Either set VERSION env (e.g. VERSION=0.1.0-test task release:dmg) or push a v* tag first (e.g. git tag v0.1.0).'
+      - sh: '[ "{{.VERSION}}" != "dev" ] && [ "{{.VERSION}}" != "0.0.0" ]'
+        msg: 'VERSION="{{.VERSION}}" looks like a placeholder. Refusing to package a release artifact with no real version. Set VERSION env or tag the commit.'
     cmds:
       - mkdir -p dist
       - |
@@ -136,7 +147,8 @@ tasks:
     desc: Notarize the DMG and staple the ticket
     deps: [release:dmg]
     vars:
-      VERSION: '{{.VERSION | default "dev"}}'
+      VERSION:
+        sh: test -n "$VERSION" && echo "$VERSION" || (git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
     preconditions:
       - sh: '[ -n "$APPLE_API_KEY_P8" ]'
         msg: 'APPLE_API_KEY_P8 (path to .p8 file) must be set'
