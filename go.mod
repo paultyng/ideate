@@ -85,3 +85,5 @@ require (
 )
 
 tool github.com/paultyng/testagent
+
+replace github.com/charmbracelet/x/vt => github.com/toller892/x/vt v0.0.0-20260601191830-4fbcadcb407e
