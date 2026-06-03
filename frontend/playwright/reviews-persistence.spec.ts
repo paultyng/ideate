@@ -90,8 +90,8 @@ async function waitForRecord<T>(
 }
 
 test.describe('Review persistence — drafts survive close/reopen', () => {
-  const base = process.env.TEST_DIFF_BASE || '5a1520d'
-  const head = process.env.TEST_DIFF_HEAD || 'f48af0e'
+  const base = process.env.TEST_DIFF_BASE || '35b9245'
+  const head = process.env.TEST_DIFF_HEAD || 'ae32bef'
 
   const seededIds = [
     'persistence-diff-autosave',

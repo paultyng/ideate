@@ -61,8 +61,8 @@ test.describe('Review View', () => {
     })
 
     // Default to well-known commits for deterministic diffs
-    const base = process.env.TEST_DIFF_BASE || '5a1520d'
-    const head = process.env.TEST_DIFF_HEAD || 'f48af0e'
+    const base = process.env.TEST_DIFF_BASE || '35b9245'
+    const head = process.env.TEST_DIFF_HEAD || 'ae32bef'
 
     await page.goto(`/#/review?repo=${encodeURIComponent(REPO_PATH)}&base=${base}&head=${head}`)
 
@@ -139,8 +139,8 @@ test.describe('Review View', () => {
 })
 
 test.describe('Review submit flow (in-app)', () => {
-  const base = process.env.TEST_DIFF_BASE || '5a1520d'
-  const head = process.env.TEST_DIFF_HEAD || 'f48af0e'
+  const base = process.env.TEST_DIFF_BASE || '35b9245'
+  const head = process.env.TEST_DIFF_HEAD || 'ae32bef'
 
   test.afterEach(() => {
     // Clean up any reviews seeded in tests below.

@@ -283,12 +283,13 @@ test.describe('Screenshots', () => {
 
   test('diff review with synthetic diff and inline comment', async ({ page }) => {
     const id = 'screenshot-diff-review'
-    // Override the standard test diff (M1 add — all-additions, all-green)
-    // with a real bug-fix commit that has interspersed +/- on a few files
-    // so the screenshot shows realistic review content. Stable refs on
-    // remote main, won't drift.
-    const base = '9a68c18'
-    const head = '6ca14cc'
+    // Override the standard test diff with a small real PR that has
+    // interspersed +/- on a few files (PR #14: app icon + lightbulb
+    // swap — .gitignore allow-list, Taskfile.yaml icon:build task,
+    // IdeaSession.tsx Lightbulb→inline-SVG) so the screenshot shows
+    // realistic review content. Stable post-OSS-release SHAs.
+    const base = '2a34f59'
+    const head = '06f17d5'
 
     fs.mkdirSync(REVIEWS_DIR, { recursive: true, mode: 0o700 })
     const record = {

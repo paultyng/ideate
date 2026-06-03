@@ -274,10 +274,14 @@ tasks:
   test:ui:
     desc: "Start wails dev, run Playwright tests, stop."
     vars:
-      # Well-known commits for deterministic diffs:
-      # 5a1520d = docs-only, f48af0e = M1 implementation (35 files changed)
-      TEST_DIFF_BASE: '{{.TEST_DIFF_BASE | default "5a1520d"}}'
-      TEST_DIFF_HEAD: '{{.TEST_DIFF_HEAD | default "f48af0e"}}'
+      # Stable commits on origin/main for deterministic playwright diffs:
+      # 35b9245 = v0.1.0 release prep, ae32bef = v0.1.1 (bindisco merge).
+      # Both are reachable from the v0.1.0 / v0.1.1 tags so they survive
+      # any future fresh clone. (Older fixtures 5a1520d / f48af0e were
+      # orphaned by the pre-OSS-release squash and stopped existing on
+      # origin, causing 8 review-related test-ui failures.)
+      TEST_DIFF_BASE: '{{.TEST_DIFF_BASE | default "35b9245"}}'
+      TEST_DIFF_HEAD: '{{.TEST_DIFF_HEAD | default "ae32bef"}}'
       TEST_DIFF_REPO: '{{.TEST_DIFF_REPO | default "."}}'
       TEST_SPEC: '{{.TEST_SPEC | default ""}}'
       TEST_TIMEOUT: '{{.TEST_TIMEOUT | default "30000"}}'
