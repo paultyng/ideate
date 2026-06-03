@@ -269,6 +269,14 @@ func (r *TestAgentRunner) Run(_ context.Context, config SessionConfig, outputFun
 	var tempFiles []string
 	if r.HooksURL != "" {
 		hooksOpts := []claudecode.Option{}
+		// SessionHeader is the auth header — hooks.HookServer rejects any
+		// POST that's missing it BEFORE checking the slug. Match the real
+		// claude runner's hook config (see claudecode/config.go where both
+		// headers get added) so testagent's SessionEnd / PostToolUse hooks
+		// reach the handler instead of bouncing with 400.
+		if config.SessionID != "" {
+			hooksOpts = append(hooksOpts, claudecode.WithHeader(claudecode.SessionHeader, config.SessionID))
+		}
 		if config.IdeaSlug != "" {
 			hooksOpts = append(hooksOpts, claudecode.WithHeader(claudecode.IdeaSlugHeader, config.IdeaSlug))
 		} else {
