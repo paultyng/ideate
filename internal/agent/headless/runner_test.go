@@ -115,8 +115,13 @@ func TestClaudeRunner_CtxCancellationKillsSubprocess(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "claude")
-	// Script sleeps forever — only a kill ends it.
-	script := "#!/bin/sh\ncat >/dev/null\nsleep 30\n"
+	// Script hangs until a kill arrives. `exec sleep` replaces sh in the
+	// same PID so exec.CommandContext's SIGKILL kills sleep directly. The
+	// earlier `sleep 30` (no exec) ran sleep as sh's child; after SIGKILL
+	// reaped sh, the orphaned sleep was reparented to init and kept the
+	// stdout pipe open for its full 30 s, making this test flake on slow
+	// CI runners that didn't hit EOF inside the 5 s deadline.
+	script := "#!/bin/sh\ncat >/dev/null\nexec sleep 30\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatalf("write: %v", err)
 	}
