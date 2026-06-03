@@ -146,6 +146,8 @@ func (r *ClaudeCodeRunner) Run(_ context.Context, config SessionConfig, outputFu
 		ccConfig.Env = claudeCfg.Env
 	}
 
+	ccConfig.BinaryPath = resolveClaudeBinaryOverride(os.Getenv("IDEATE_CLAUDE_BINARY"), claudeCfg.Binary)
+
 	cmd, tempFiles, err := claudecode.BuildCommand(ccConfig)
 	if err != nil {
 		return nil, err
@@ -301,6 +303,18 @@ func (r *TestAgentRunner) Run(_ context.Context, config SessionConfig, outputFun
 		sess.WatchInactivity(autoExitDur, []byte("/exit\r"))
 	}
 	return sess, nil
+}
+
+// resolveClaudeBinaryOverride picks the bindisco Override path from the
+// two user-supplied sources. Env wins over config so a single launch can
+// target a different claude (e.g. testing a beta build) without editing
+// config.json. Both empty → empty result, letting bindisco walk the
+// standard tiers.
+func resolveClaudeBinaryOverride(envBinary, cfgBinary string) string {
+	if envBinary != "" {
+		return envBinary
+	}
+	return cfgBinary
 }
 
 func (r *TestAgentRunner) findBinary() (string, error) {

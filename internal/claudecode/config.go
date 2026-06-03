@@ -8,10 +8,37 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	"github.com/paultyng/ideate/internal/bindisco"
 	"github.com/paultyng/ideate/internal/model"
 )
+
+// claudeNotFoundHint is appended to the discovery-failure error so users
+// see both escape hatches inline. Listed in priority order: env var wins
+// because it's per-launch and doesn't require editing config.json.
+const claudeNotFoundHint = `Two ways to fix:
+  1. Set IDEATE_CLAUDE_BINARY in your environment and relaunch Ideate:
+       export IDEATE_CLAUDE_BINARY=/absolute/path/to/claude
+  2. Add agents.claude.binary to <ideas-dir>/config.json:
+       { "agents": { "claude": { "binary": "/absolute/path/to/claude" } } }
+
+To find the absolute path, run this from a terminal:
+  which claude`
+
+// claudeExtraCommonPaths returns claude-specific install locations that
+// bindisco's per-OS curated list doesn't carry. Today: the Anthropic
+// installer's ~/.claude/local/claude. Skipped on home-dir resolution
+// failure (the rare /etc/passwd-misconfigured case) so a missing HOME
+// just degrades to the standard tiers rather than panicking.
+func claudeExtraCommonPaths() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{filepath.Join(home, ".claude", "local", "claude")}
+}
 
 // SessionHeader is the HTTP header used to identify the agent session.
 // Used by MCP requests, where each Claude process registers a per-session
@@ -193,32 +220,32 @@ type CommandConfig struct {
 	// CommandConfig so the merged set travels with the command description
 	// if callers need to inspect it; BuildCommand itself does not consume it.
 	Env map[string]string
-	// BinaryPath overrides the resolved claude binary. Empty means BuildCommand
-	// resolves via exec.LookPath("claude") (the production path). Production
-	// callers leave this empty; tests set it to a sentinel so BuildCommand
-	// doesn't depend on the CI runner having a real claude on $PATH. The
-	// bindisco rework (backlog 3c74c629) will populate this from the resolved
-	// discovery result instead of LookPath-ing inside BuildCommand.
+	// BinaryPath is passed through to bindisco.Resolve as its Override
+	// tier — non-empty values are used verbatim, skipping $PATH lookup
+	// and the curated-paths fallback. Production callers populate this
+	// from the IDEATE_CLAUDE_BINARY env var or the agents.claude.binary
+	// config field, in that order. Tests set it to a sentinel so the
+	// resolve step doesn't depend on the CI runner having a real claude
+	// installed.
 	BinaryPath string
 }
 
 // BuildCommand finds the claude CLI and returns an exec.Cmd with all arguments
 // and a list of temp files to clean up on exit.
 //
-// SECURITY: exec.LookPath resolves `claude` against the user's $PATH. A
-// malicious binary earlier in PATH (compromised npm install in node_modules/.bin,
-// modified shell rc) would be spawned with full session privileges. Accepted
-// for the v0.1 single-user, local-desktop threat model — every component the
-// user runs already has the same trust level. Revisit if Ideate ever sandboxes
-// agents, runs as a service, or supports multi-user.
+// SECURITY: bindisco.Resolve (and exec.LookPath underneath) honors the
+// user's $PATH. A malicious binary earlier in PATH (compromised npm install
+// in node_modules/.bin, modified shell rc) would be spawned with full session
+// privileges. Accepted for the v0.1 single-user, local-desktop threat model
+// — every component the user runs already has the same trust level. Revisit
+// if Ideate ever sandboxes agents, runs as a service, or supports multi-user.
 func BuildCommand(config CommandConfig) (*exec.Cmd, []string, error) {
-	claudePath := config.BinaryPath
-	if claudePath == "" {
-		resolved, err := exec.LookPath("claude")
-		if err != nil {
-			return nil, nil, fmt.Errorf("claude CLI not found: %w", err)
-		}
-		claudePath = resolved
+	claudePath, err := bindisco.Resolve("claude", bindisco.Locations{
+		Override:         config.BinaryPath,
+		ExtraCommonPaths: claudeExtraCommonPaths(),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w\n\n%s", err, claudeNotFoundHint)
 	}
 
 	args := []string{"-n", config.Name}

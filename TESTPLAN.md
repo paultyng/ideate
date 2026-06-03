@@ -83,6 +83,17 @@ Dormancy is now set only by the startup adoption sweep — sessions whose PID is
 
 These require `claude` CLI installed and authenticated. Start from an idea with seeded resources.
 
+### Binary discovery (`internal/bindisco`)
+
+The launchd-PATH gap is the most likely first-launch failure on macOS. Exercise each tier:
+
+- [ ] **$PATH hit**: terminal-launch with `claude` on $PATH (`open -a Ideate` from a shell where `which claude` succeeds). Session starts.
+- [ ] **Curated-paths hit**: launch from Finder/Dock with `claude` installed only at `~/.local/bin/claude` (or `/opt/homebrew/bin/claude` etc) and a barebones launchd PATH. Session starts; no override set.
+- [ ] **`~/.claude/local/claude` hit**: same as above but with `claude` only at the Anthropic-installer location.
+- [ ] **`IDEATE_CLAUDE_BINARY` override**: set the env var before launch (e.g. `IDEATE_CLAUDE_BINARY=/tmp/claude-stub /Applications/Ideate.app/Contents/MacOS/ideate`). Session uses the override even if a real claude is on $PATH.
+- [ ] **`agents.claude.binary` config**: set in `<ideas-dir>/config.json`, restart Ideate, start session — override used. Env var (if set) wins over config.
+- [ ] **Not-found error**: rename / remove `claude` from every searched location, start session — error toast starts with `binary not found: "claude"; looked in: $PATH, …` (lists every searched path), followed by the two escape hatches (`IDEATE_CLAUDE_BINARY` env, `agents.claude.binary` config) and a `which claude` hint.
+
 - [ ] **Context injection**: start Claude session, ask "What idea are you working on?" — Claude mentions idea name, status, linked resources (from `--append-system-prompt`)
 - [ ] **MCP get_idea**: ask Claude to call `get_idea` — returns current idea metadata
 - [ ] **MCP list_resources**: ask Claude to call `list_resources` — returns linked resources

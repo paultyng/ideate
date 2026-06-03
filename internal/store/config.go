@@ -38,6 +38,14 @@ type AgentsConfig struct {
 
 // ClaudeAgent carries user-configured knobs for the Claude runner.
 type ClaudeAgent struct {
+	// Binary, if non-empty, overrides bindisco's discovery and is used
+	// verbatim as the claude executable path. Use when claude lives in
+	// a location bindisco's curated per-OS list doesn't cover, or to
+	// force a specific install across multiple installations. Also
+	// settable per-launch via the IDEATE_CLAUDE_BINARY env var; the
+	// env var wins if both are set.
+	Binary string `json:"binary,omitempty"`
+
 	// Extra --add-dir paths layered on top of the per-idea AddDirs
 	// (idea root + each linked repo path). `~` and `$VARS` are
 	// expanded at Run() time so the same config.json travels across
