@@ -1,6 +1,7 @@
 version: "3"
 
-dotenv: ['.env']
+# .env is loaded per-task (release:sign, release:notarize). Avoids leaking
+# secrets into the env of unrelated tasks (test, build, dev, lint).
 
 tasks:
   build:testagent:
@@ -107,6 +108,7 @@ tasks:
   release:sign:
     desc: Codesign cmd/ideate/build/bin/ideate.app for distribution
     deps: [build]
+    dotenv: ['.env']
     vars:
       SIGNING_IDENTITY: '{{.SIGNING_IDENTITY | default "-"}}'  # "-" = adhoc; override to Developer ID for real signing
     cmds:
@@ -146,6 +148,7 @@ tasks:
   release:notarize:
     desc: Notarize the DMG and staple the ticket
     deps: [release:dmg]
+    dotenv: ['.env']
     vars:
       VERSION:
         sh: test -n "$VERSION" && echo "$VERSION" || (git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
