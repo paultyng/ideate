@@ -295,11 +295,13 @@ func (r *TestAgentRunner) Run(_ context.Context, config SessionConfig, outputFun
 
 	cmd := exec.Command(bin, testArgs...)
 	cmd.Dir = config.WorkingDir
-	// Reuse claude's env-builder so testagent gets the same terminal
-	// identity (TERM=xterm-256color, COLORTERM=truecolor) — important
-	// for the playwright color-regression suite, and for consistent
-	// behaviour between dev runner and the real claude path.
-	cmd.Env = buildClaudeEnv(os.Environ(), store.ClaudeAgent{})
+	// Inherit env unchanged — testagent's Bubble Tea TUI parses
+	// stdin differently when TERM advertises full xterm capability
+	// (alt-screen, raw input mode), breaking the playwright tests
+	// that drive `/exit` and other slash commands via page.keyboard.type.
+	// The PTY env override for color rendering lives in buildClaudeEnv
+	// and only applies to the real claude runner.
+	cmd.Env = os.Environ()
 	cmd.SysProcAttr = newSysProcAttr()
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
