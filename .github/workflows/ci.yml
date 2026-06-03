@@ -115,3 +115,14 @@ jobs:
         with:
           name: playwright-results
           path: frontend/test-results/
+
+      # Wails dev server stdout/stderr goes to logs/e2e-*.log via Taskfile's
+      # tee. Captures session_end hooks, coordinator events, and any panic
+      # traces — essential for diagnosing test-ui failures since playwright
+      # artifacts only show the page snapshot at failure time.
+      - name: Upload dev-server log
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-log
+          path: logs/e2e-*.log
