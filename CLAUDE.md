@@ -409,6 +409,7 @@ User-level knobs live in `<ideas-dir>/config.json`. Per-agent runner settings ne
 {
   "agents": {
     "claude": {
+      "binary":     "/Users/me/.local/bin/claude",
       "add_dirs":   ["~/.claude/skills"],
       "extra_args": ["--debug"]
     }
@@ -416,6 +417,7 @@ User-level knobs live in `<ideas-dir>/config.json`. Per-agent runner settings ne
 }
 ```
 
+- `agents.claude.binary` — absolute path to the claude executable. Overrides bindisco's automatic discovery (`$PATH` → curated common paths like `~/.local/bin`, `/opt/homebrew/bin`, `~/.claude/local`). Use when claude lives somewhere bindisco doesn't scan, or to pin a specific install. The `IDEATE_CLAUDE_BINARY` env var wins over this field for per-launch overrides without editing config.
 - `agents.claude.add_dirs` — extra `--add-dir` paths appended for every Claude session. `~` and `$VARS` are expanded at session start.
 - `agents.claude.extra_args` — verbatim CLI flags appended **after** every Ideate-managed flag (so the user's `--model` / `--debug` wins by last-occurrence). Overriding Ideate's own flags (`--settings`, `--mcp-config`, `--resume`, `--session-id`) will break hooks, MCP, and resume.
 

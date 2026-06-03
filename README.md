@@ -44,6 +44,24 @@ task build            # produces cmd/ideate/build/bin/ideate.app
 open cmd/ideate/build/bin/ideate.app
 ```
 
+### `claude` not found?
+
+When launched from Finder, macOS apps inherit launchd's PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), not your shell PATH. Ideate scans the usual locations (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm/bin`, `~/.nvm/versions/node/*/bin`, `~/.claude/local`) but if claude lives somewhere else, point Ideate at it explicitly:
+
+```sh
+# Per-launch override (wins over config):
+export IDEATE_CLAUDE_BINARY=/absolute/path/to/claude
+open /Applications/Ideate.app
+```
+
+Or persist it in `<ideas-dir>/config.json`:
+
+```json
+{ "agents": { "claude": { "binary": "/absolute/path/to/claude" } } }
+```
+
+`which claude` from your terminal prints the absolute path.
+
 ## Daily Use
 
 1. Launch `ideate` (or open the .app). The dashboard shows your ideas grouped by status.
