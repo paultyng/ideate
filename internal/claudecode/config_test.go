@@ -9,6 +9,11 @@ import (
 	"github.com/paultyng/ideate/internal/model"
 )
 
+// testClaudeBinary is a sentinel path injected into CommandConfig.BinaryPath
+// so BuildCommand skips its exec.LookPath("claude") lookup. The tests inspect
+// cmd.Args but never execute the command, so the path doesn't need to resolve.
+const testClaudeBinary = "/path/to/claude-test-stub"
+
 func TestGenerateSettingsFile(t *testing.T) {
 	t.Parallel()
 
@@ -83,9 +88,10 @@ func TestBuildCommand_OrchestratorSentinelHeader(t *testing.T) {
 	t.Parallel()
 
 	cmd, tempFiles, err := BuildCommand(CommandConfig{
-		Name:      "test",
-		AgentUUID: "00000000-0000-0000-0000-000000000000",
-		HooksURL:  "http://localhost:9876/hooks",
+		Name:       "test",
+		AgentUUID:  "00000000-0000-0000-0000-000000000000",
+		HooksURL:   "http://localhost:9876/hooks",
+		BinaryPath: testClaudeBinary,
 		// IdeaSlug deliberately empty — orchestrator path.
 	})
 	if err != nil {
@@ -177,6 +183,7 @@ func TestBuildCommand_ExtraArgsAndAddDirs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.cfg.BinaryPath = testClaudeBinary
 			cmd, tempFiles, err := BuildCommand(tc.cfg)
 			if err != nil {
 				t.Fatalf("BuildCommand: %v", err)
