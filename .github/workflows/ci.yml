@@ -126,3 +126,14 @@ jobs:
         with:
           name: e2e-log
           path: logs/e2e-*.log
+
+      # Testagent exit-path trace from the debug/exit-trace branch of
+      # paultyng/testagent (wired via go.mod replace on the
+      # debug/testagent-exit-trace Ideate branch). Each line names one
+      # exit path that fired. Diagnosis target: backlog 726a2a3c.
+      - name: Upload testagent exit trace
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: testagent-exit-trace
+          path: logs/testagent-exit-trace-*.log

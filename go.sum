@@ -126,8 +126,8 @@ github.com/mattn/go-runewidth v0.0.24 h1:cpokDiIn0MGnhdHwuWnJBITySJ20QyNGnY2kR/a
 github.com/mattn/go-runewidth v0.0.24/go.mod h1:XBkDxAl56ILZc9knddidhrOlY5R/pDhgLpndooCuJAs=
 github.com/muesli/cancelreader v0.2.2 h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=
 github.com/muesli/cancelreader v0.2.2/go.mod h1:3XuTXfFS2VjM+HTLZY9Ak0l6eUKfijIfMUZ4EgX0QYo=
-github.com/paultyng/testagent v0.3.1 h1:D6e0Qif/JQwBdnOL+cpMMFQNVB/ISqCpCuHvBIw/roM=
-github.com/paultyng/testagent v0.3.1/go.mod h1:DbseZ9Gsi/xYS2UKdsha1zle7rdfRlCJn1uFxSIhH0I=
+github.com/paultyng/testagent v0.3.2-0.20260603203614-f41a11797aeb h1:hrWym6prgsVXfosfOL3m7LTtKjPs78MYe/Pyte1+V+A=
+github.com/paultyng/testagent v0.3.2-0.20260603203614-f41a11797aeb/go.mod h1:DbseZ9Gsi/xYS2UKdsha1zle7rdfRlCJn1uFxSIhH0I=
 github.com/pjbgf/sha1cd v0.6.0 h1:3WJ8Wz8gvDz29quX1OcEmkAlUg9diU4GxJHqs0/XiwU=
 github.com/pjbgf/sha1cd v0.6.0/go.mod h1:lhpGlyHLpQZoxMv8HcgXvZEhcGs0PG/vsZnEJ7H0iCM=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c h1:+mdjkGKdHQG3305AYmdv1U2eRNDiU2ErMBj1gwrq8eQ=

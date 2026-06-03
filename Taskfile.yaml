@@ -324,7 +324,19 @@ tasks:
         # Wails dev on 34116, hooks on 34119 so test:ui can run alongside
         # both `task dev:user` (34115/34117) and `task dev` (34116/34118).
         TEST_CONFIG="$(mktemp -d)/ideate-test"
-        (cd cmd/ideate && IDEATE_CONFIG_DIR="$TEST_CONFIG" IDEATE_IDEAS_DIR="$TEST_CONFIG/ideas" IDEATE_HOOKS_PORT=34119 IDEATE_LOG_DIR="$TEST_CONFIG/logs" IDEATE_CLAUDE_PROJECTS_DIR="$TEST_CONFIG/claude-projects" TESTAGENT_AUTO_EXIT={{.TESTAGENT_AUTO_EXIT}} TESTAGENT_DELAY=50ms wails dev -tags dev -devserver localhost:34116) > "$LOG_FILE" 2>&1 &
+        # TESTAGENT_EXIT_TRACE: diagnostic env (paired with the
+        # debug/exit-trace branch in paultyng/testagent, wired here via
+        # go.mod replace). Every testagent shutdown appends one line
+        # naming which exit path fired (ctx-done, signal, auto-exit,
+        # stdin-eof, or empty-reason-forced-to-other). Uploaded as a CI
+        # artifact for backlog 726a2a3c diagnosis. Stays a noop in
+        # production builds where the env var is unset.
+        # Put the trace under repo-relative logs/ so the existing CI upload
+        # step (logs/e2e-*.log path) plus a sibling upload step pick it up
+        # without copying anything around.
+        mkdir -p logs
+        TESTAGENT_EXIT_TRACE_FILE="$(pwd)/logs/testagent-exit-trace-$(date +%Y%m%d-%H%M%S).log"
+        (cd cmd/ideate && IDEATE_CONFIG_DIR="$TEST_CONFIG" IDEATE_IDEAS_DIR="$TEST_CONFIG/ideas" IDEATE_HOOKS_PORT=34119 IDEATE_LOG_DIR="$TEST_CONFIG/logs" IDEATE_CLAUDE_PROJECTS_DIR="$TEST_CONFIG/claude-projects" TESTAGENT_AUTO_EXIT={{.TESTAGENT_AUTO_EXIT}} TESTAGENT_DELAY=50ms TESTAGENT_EXIT_TRACE="$TESTAGENT_EXIT_TRACE_FILE" wails dev -tags dev -devserver localhost:34116) > "$LOG_FILE" 2>&1 &
         echo "wails dev started, waiting for server..."
 
         # Poll dev server (max 120s — CI first run is slow)
