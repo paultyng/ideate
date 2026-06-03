@@ -146,6 +146,16 @@ func (r *ClaudeCodeRunner) Run(_ context.Context, config SessionConfig, outputFu
 		ccConfig.Env = claudeCfg.Env
 	}
 
+	// Compose the binary override. Env wins so users can point a single
+	// launch at a different claude (e.g. testing a beta build) without
+	// editing config.json. Falls through to config; empty BinaryPath
+	// lets bindisco.Resolve walk the standard tiers.
+	if env := os.Getenv("IDEATE_CLAUDE_BINARY"); env != "" {
+		ccConfig.BinaryPath = env
+	} else if claudeCfg.Binary != "" {
+		ccConfig.BinaryPath = claudeCfg.Binary
+	}
+
 	cmd, tempFiles, err := claudecode.BuildCommand(ccConfig)
 	if err != nil {
 		return nil, err
