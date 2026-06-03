@@ -58,60 +58,88 @@ async function getCapturedURLs(page: import('@playwright/test').Page): Promise<O
 // screen.height / terminal.rows. Cell width is screen.width /
 // terminal.cols (NOT a hardcoded 80, which broke when the drawer was
 // resized to a different col count).
+// `requireOscLink: true` switches clickLinkRow into an event-driven wait
+// for xterm.js's OSC 8 `urlId` attribute to land on the matched cell. After
+// a drawer resize the buffer reflows asynchronously (FitAddon → xterm
+// render loop), and during that window the OSC 8 metadata briefly detaches
+// from the visible cells — locally it settles in <50ms, but the macOS-14
+// CI runner has been observed taking longer. waitForFunction polls every
+// ~100ms and resolves the moment xterm reapplies the metadata, so we add
+// zero waste on a fast settle and stay deterministic on a slow one.
+//
+// Plain-URL tests (WebLinksAddon) don't set `urlId` — the matcher attaches
+// the link region per-line at render time, with no cell attribute. Pass
+// `requireOscLink: false` (the default) so those tests fall back to the
+// first text match and click that.
 async function clickLinkRow(
   page: import('@playwright/test').Page,
   containerSelector: string,
   linkText: string,
+  options: { requireOscLink?: boolean; timeoutMs?: number } = {},
 ): Promise<boolean> {
+  const { requireOscLink = false, timeoutMs = 5000 } = options
   const handle = page.locator(containerSelector)
   await handle.waitFor({ state: 'visible' })
   const screen = handle.locator('.xterm-screen').first()
   const box = await screen.boundingBox()
   if (!box) return false
 
-  const meta = await page.evaluate(
-    ({ sel, needle }) => {
+  const queryArgs = { sel: containerSelector, needle: linkText, requireOscLink }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const queryFn = ({ sel, needle, requireOscLink }: typeof queryArgs): any => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
+    if (!reg) return null
+    const root = document.querySelector(sel) as HTMLElement | null
+    if (!root) return null
+    // Pick the terminal whose .terminal-container ancestor matches
+    // the requested selector — there can be multiple terminals
+    // mounted (idea-session + orchestrator).
+    for (const [, termU] of Object.entries(reg)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
-      if (!reg) return null
-      const root = document.querySelector(sel) as HTMLElement | null
-      if (!root) return null
-      // Pick the terminal whose .terminal-container ancestor matches
-      // the requested selector — there can be multiple terminals
-      // mounted (idea-session + orchestrator).
-      for (const [, termU] of Object.entries(reg)) {
+      const term = termU as any
+      const elem: HTMLElement | undefined = term.element
+      if (!elem) continue
+      if (!root.contains(elem)) continue
+      const buf = term.buffer.active
+      const start: number = buf.viewportY
+      const candidates: Array<{ row: number; col: number; hasOscLink: boolean }> = []
+      for (let visible = 0; visible < term.rows; visible++) {
+        const line = buf.getLine(start + visible)
+        if (!line) continue
+        const text: string = line.translateToString(true)
+        const col = text.indexOf(needle)
+        if (col < 0) continue
+        // Probe a cell inside the matched text for an OSC 8 link
+        // marker. `cell.extended.urlId` is xterm v6's per-cell link
+        // attribute (set by InputHandler.setHyperlink).
+        const probeCol = col + Math.floor(needle.length / 2)
+        const cell = line.getCell(probeCol)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const term = termU as any
-        const elem: HTMLElement | undefined = term.element
-        if (!elem) continue
-        if (!root.contains(elem)) continue
-        const buf = term.buffer.active
-        const start: number = buf.viewportY
-        const candidates: Array<{ row: number; col: number; hasOscLink: boolean }> = []
-        for (let visible = 0; visible < term.rows; visible++) {
-          const line = buf.getLine(start + visible)
-          if (!line) continue
-          const text: string = line.translateToString(true)
-          const col = text.indexOf(needle)
-          if (col < 0) continue
-          // Probe a cell inside the matched text for an OSC 8 link
-          // marker. `cell.extended.urlId` is xterm v6's per-cell link
-          // attribute (set by InputHandler.setHyperlink).
-          const probeCol = col + Math.floor(needle.length / 2)
-          const cell = line.getCell(probeCol)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const hasOscLink = !!(cell as any)?.extended?.urlId
-          candidates.push({ row: visible, col, hasOscLink })
-        }
-        if (candidates.length === 0) continue
-        const oscRow = candidates.find((c) => c.hasOscLink)
-        const pick = oscRow ?? candidates[0]
-        return { row: pick.row, col: pick.col, totalRows: term.rows, totalCols: term.cols }
+        const hasOscLink = !!(cell as any)?.extended?.urlId
+        candidates.push({ row: visible, col, hasOscLink })
       }
-      return null
-    },
-    { sel: containerSelector, needle: linkText },
-  )
+      if (candidates.length === 0) continue
+      const oscRow = candidates.find((c) => c.hasOscLink)
+      // OSC 8 tests require a cell with urlId or the click won't fire
+      // linkHandler.activate. Return null so waitForFunction keeps polling
+      // while xterm settles the buffer.
+      if (requireOscLink && !oscRow) continue
+      const pick = oscRow ?? candidates[0]
+      return { row: pick.row, col: pick.col, totalRows: term.rows, totalCols: term.cols }
+    }
+    return null
+  }
+
+  let meta: { row: number; col: number; totalRows: number; totalCols: number } | null
+  if (requireOscLink) {
+    // waitForFunction polls until queryFn returns a truthy object; we then
+    // jsonValue() it back into the test-side shape.
+    const jsHandle = await page.waitForFunction(queryFn, queryArgs, { timeout: timeoutMs })
+    meta = (await jsHandle.jsonValue()) as typeof meta
+  } else {
+    meta = (await page.evaluate(queryFn, queryArgs)) as typeof meta
+  }
   if (!meta) return false
 
   const cellW = box.width / meta.totalCols
@@ -167,7 +195,7 @@ test.describe('Terminal link clicks', () => {
     await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
       .toContain('example link')
 
-    const clicked = await clickLinkRow(page, containerSelector, 'example link')
+    const clicked = await clickLinkRow(page, containerSelector, 'example link', { requireOscLink: true })
     expect(clicked).toBeTruthy()
 
     await expect.poll(async () => (await getCapturedURLs(page)).urls, { timeout: 5000 })
@@ -246,7 +274,7 @@ test.describe('Terminal link clicks', () => {
       return Number.isFinite(v) && v > 0
     })
 
-    const clicked = await clickLinkRow(page, containerSelector, 'example link drag')
+    const clicked = await clickLinkRow(page, containerSelector, 'example link drag', { requireOscLink: true })
     expect(clicked).toBeTruthy()
 
     await expect.poll(async () => (await getCapturedURLs(page)).urls, { timeout: 5000 })
@@ -335,7 +363,7 @@ test.describe('Terminal link clicks', () => {
     await page.waitForSelector('.orchestrator-host .terminal-container', { timeout: 10000 })
     await page.waitForSelector('.orchestrator-host .xterm-screen', { timeout: 5000 })
 
-    const clicked = await clickLinkRow(page, containerSelector, 'example link hide show')
+    const clicked = await clickLinkRow(page, containerSelector, 'example link hide show', { requireOscLink: true })
     expect(clicked).toBeTruthy()
 
     await expect.poll(async () => (await getCapturedURLs(page)).urls, { timeout: 5000 })
