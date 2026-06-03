@@ -99,3 +99,32 @@ func TestBuildClaudeEnv_ParentEnvPreserved(t *testing.T) {
 		}
 	}
 }
+
+// resolveClaudeBinaryOverride is the env-then-config precedence helper
+// feeding bindisco.Resolve's Override tier. Env wins by design so a single
+// launch can target a different claude (e.g. testing a beta build) without
+// editing the per-ideas config. Both empty → empty (bindisco walks tiers).
+func TestResolveClaudeBinaryOverride(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		envBinary string
+		cfgBinary string
+		want      string
+	}{
+		{name: "neither set leaves override empty", want: ""},
+		{name: "env only", envBinary: "/env/claude", want: "/env/claude"},
+		{name: "config only", cfgBinary: "/cfg/claude", want: "/cfg/claude"},
+		{name: "both set: env wins", envBinary: "/env/claude", cfgBinary: "/cfg/claude", want: "/env/claude"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolveClaudeBinaryOverride(tc.envBinary, tc.cfgBinary)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -32,11 +32,17 @@ type Locations struct {
 	// Use for env-var overrides (e.g. IDEATE_CLAUDE_BINARY) and
 	// config-file knobs (e.g. agents.claude.binary in config.json).
 	// Empty when no override is set.
+	//
+	// Contract: Resolve returns Override without stat'ing or executable-
+	// bit checking it. A non-existent or non-executable Override surfaces
+	// only at exec time. Caller owns validation when per-source error
+	// messages matter (e.g. "env var points nowhere" vs "config field
+	// points nowhere").
 	Override string
 
-	// ExtraCommonPaths is appended to the curated per-OS path list before
-	// the final lookup pass. Use for binary-specific locations the curated
-	// list doesn't carry (e.g. ~/.claude/local/claude for the Anthropic
+	// ExtraCommonPaths lands AFTER the curated per-OS entries in the
+	// lookup order. Use for binary-specific locations the curated list
+	// doesn't carry (e.g. ~/.claude/local/claude for the Anthropic
 	// installer). Each entry should be an absolute path that already
 	// includes the binary name — Resolve checks it as-is.
 	ExtraCommonPaths []string
@@ -119,6 +125,9 @@ func candidatePaths(name string, extra []string) []string {
 // the user most recently installed, which is usually the one their shell
 // rc points $PATH at.
 func expandNvmGlob(home, name string) []string {
+	if home == "" {
+		return nil
+	}
 	root := filepath.Join(home, ".nvm", "versions", "node")
 	entries, err := os.ReadDir(root)
 	if err != nil {
