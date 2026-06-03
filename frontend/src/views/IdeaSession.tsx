@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Lightbulb, Square, Play, CircleHelp } from 'lucide-react'
+import { Square, Play, CircleHelp } from 'lucide-react'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import TerminalPanel from '../components/TerminalPanel'
 import TopbarActions from '../components/TopbarActions'
@@ -234,7 +234,15 @@ export default function IdeaSession() {
         aria-label="Back to idea"
         onClick={() => navigate(`/idea/${slug}`)}
       >
-        <Lightbulb size={14} strokeWidth={1.75} />
+        {/* Inline Folio "i" — echoes the app icon's serif-i-with-dot mark.
+            Single-color (currentColor) so it inherits the button's text
+            color and stays visually aligned with the lucide icons used
+            elsewhere in the toolbar. Background square from the app icon
+            is omitted; the toolbar button supplies its own framing. */}
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <circle cx="8" cy="3" r="1.75" />
+          <path d="M5 6 H11 V7 H9 V13 H11 V14 H5 V13 H7 V7 H5 Z" />
+        </svg>
       </button>
       {completedSession && (
         <span className={`status-badge ${completedSession.status}`}>{completedSession.status}</span>

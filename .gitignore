@@ -2,6 +2,12 @@
 build/
 !cmd/ideate/build/
 cmd/ideate/build/*
+# Wails uses build/appicon.png as the universal icon source: at build
+# time it regenerates build/darwin/icon.icns (and the bundled
+# iconfile.icns) from THIS file, ignoring any committed icon.icns.
+# Has to be tracked or CI silently falls back to the Wails W default
+# in every release artifact (see backlog 5c184bb6, v0.1.0 regression).
+!cmd/ideate/build/appicon.png
 !cmd/ideate/build/darwin/
 cmd/ideate/build/darwin/*
 !cmd/ideate/build/darwin/Info.plist

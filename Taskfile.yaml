@@ -12,6 +12,36 @@ tasks:
     generates:
       - cmd/ideate/build/bin/testagent
 
+  icon:build:
+    desc: 'Regenerate app icon artifacts from docs/media/icon.png. Writes both cmd/ideate/build/appicon.png (the file wails build actually reads when generating the bundle icon) and cmd/ideate/build/darwin/icon.icns (kept in sync as a reference / fallback).'
+    sources:
+      - docs/media/icon.png
+    generates:
+      - cmd/ideate/build/appicon.png
+      - cmd/ideate/build/darwin/icon.icns
+    preconditions:
+      - sh: test -f docs/media/icon.png
+        msg: 'docs/media/icon.png not found. Source PNG must be a 1024x1024 RGBA image.'
+      - sh: '[ "$(sips -g pixelWidth docs/media/icon.png 2>/dev/null | awk ''/pixelWidth/ {print $2}'')" = "1024" ]'
+        msg: 'docs/media/icon.png must be exactly 1024x1024. Re-export from source.'
+    cmds:
+      # appicon.png IS the wails source — wails build regenerates the
+      # bundle's iconfile.icns from this PNG every time, ignoring any
+      # committed icon.icns. So this copy is the load-bearing step.
+      - cp docs/media/icon.png cmd/ideate/build/appicon.png
+      # icon.icns is rebuilt from the same source so it doesn't drift.
+      # Built in a temp dir so partial output doesn't shadow the
+      # committed icon.icns if a sips step fails midway.
+      - |
+        set -e
+        tmp="$(mktemp -d)/Ideate.iconset"
+        mkdir -p "$tmp"
+        for spec in '16:icon_16x16.png' '32:icon_16x16@2x.png' '32:icon_32x32.png' '64:icon_32x32@2x.png' '128:icon_128x128.png' '256:icon_128x128@2x.png' '256:icon_256x256.png' '512:icon_256x256@2x.png' '512:icon_512x512.png' '1024:icon_512x512@2x.png'; do
+          size="${spec%%:*}"; name="${spec##*:}"
+          sips -z "$size" "$size" docs/media/icon.png --out "$tmp/$name" > /dev/null
+        done
+        iconutil --convert icns --output cmd/ideate/build/darwin/icon.icns "$tmp"
+
   frontend:dist:
     desc: Seed frontend/dist with a placeholder so //go:embed all:dist resolves in dev (Vite serves live; real dist is built by `task build`)
     dir: frontend
