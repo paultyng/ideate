@@ -10,7 +10,11 @@ const collectScreenshots = process.env.COLLECT_SCREENSHOTS === '1'
 export default defineConfig({
   testDir: './playwright',
   timeout: 30000,
-  retries: 0,
+  // Retries cover CI-only flakes around orchestrator session lifecycle
+  // and xterm.js layout settle on the slow macOS-14 runner. Local runs
+  // on M-series stay deterministic — set to 0 there so genuine bugs
+  // surface immediately during development, not silently retried.
+  retries: process.env.CI ? 2 : 0,
   // One worker per run — every test shares the single `wails dev`
   // backend (one filesystem store, one agent coordinator, one MCP
   // server). Multi-worker parallelism caused rotating flakes:
