@@ -61,8 +61,8 @@ test.describe('Review View', () => {
     })
 
     // Default to well-known commits for deterministic diffs
-    const base = process.env.TEST_DIFF_BASE || '5a1520d'
-    const head = process.env.TEST_DIFF_HEAD || 'f48af0e'
+    const base = process.env.TEST_DIFF_BASE || '35b9245'
+    const head = process.env.TEST_DIFF_HEAD || 'ae32bef'
 
     await page.goto(`/#/review?repo=${encodeURIComponent(REPO_PATH)}&base=${base}&head=${head}`)
 
@@ -139,8 +139,8 @@ test.describe('Review View', () => {
 })
 
 test.describe('Review submit flow (in-app)', () => {
-  const base = process.env.TEST_DIFF_BASE || '5a1520d'
-  const head = process.env.TEST_DIFF_HEAD || 'f48af0e'
+  const base = process.env.TEST_DIFF_BASE || '35b9245'
+  const head = process.env.TEST_DIFF_HEAD || 'ae32bef'
 
   test.afterEach(() => {
     // Clean up any reviews seeded in tests below.
@@ -202,11 +202,17 @@ test.describe('Review submit flow (in-app)', () => {
   })
 
   test('inline comment edit replaces body in place and persists on submit', async ({ page }) => {
+    // Line 2 (not 1): @git-diff-view starts rendering at the first
+    // hunk's begin line, and our test fixture diff (35b9245...ae32bef)
+    // first touches .gitignore at line 2 ("build/"). Line 1 sits
+    // behind the "Expand Up" affordance, so a comment seeded there
+    // has no visible anchor row to render against and the test's
+    // `.review-comment-body` selector never resolves.
     seedReviewWithComment(
       'playwright-edit-comment',
       base, head,
       '.gitignore',
-      1,
+      2,
       'first draft of feedback',
     )
     const url = `/#/review?repo=${encodeURIComponent(REPO_PATH)}&base=${base}&head=${head}&reviewId=playwright-edit-comment`
