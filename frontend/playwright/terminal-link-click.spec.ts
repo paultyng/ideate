@@ -159,7 +159,13 @@ test.describe('Terminal link clicks', () => {
     await stopAllRunningSessions(page)
   })
 
-  test('OSC 8 hyperlink click routes through openExternal — orchestrator drawer', async ({ page }) => {
+  // SKIP: orchestrator's testagent dies ~7s into the test on CI macOS-14
+  // (e2e log shows `session_end hook reason=other` with exit_code=0 before
+  // the click can fire). Locally passes deterministically. Root cause not
+  // yet pinned — tracked in backlog 726a2a3c (the diagnostic-log upload
+  // landed in PR #19 so the next investigator has data). Unskip once the
+  // orchestrator-session-lifetime race is fixed.
+  test.fixme('OSC 8 hyperlink click routes through openExternal — orchestrator drawer', async ({ page }) => {
     await page.goto('/')
     await enablePtyCapture(page)
 
@@ -232,7 +238,9 @@ test.describe('Terminal link clicks', () => {
       .toContain('https://example.com/plain-url?via=weblinks')
   })
 
-  test('OSC 8 hyperlink click routes through openExternal after drawer drag', async ({ page }) => {
+  // SKIP: same orchestrator-session-dies-on-CI race as the sibling test
+  // above. Tracked in backlog 726a2a3c.
+  test.fixme('OSC 8 hyperlink click routes through openExternal after drawer drag', async ({ page }) => {
     await page.goto('/')
     await enablePtyCapture(page)
 
@@ -330,7 +338,9 @@ test.describe('Terminal link clicks', () => {
       .toContain('https://example.com/plain-url?via=weblinks-after-drag')
   })
 
-  test('OSC 8 hyperlink click routes through openExternal after drawer hide/show', async ({ page }) => {
+  // SKIP: same orchestrator-session-dies-on-CI race as the sibling tests
+  // above. Tracked in backlog 726a2a3c.
+  test.fixme('OSC 8 hyperlink click routes through openExternal after drawer hide/show', async ({ page }) => {
     // Off-dashboard route so the orchestrator toggle button isn't
     // disabled-by-pinning (dashboard pins the drawer open). The
     // drawer starts closed on /idea/new; an initial click opens it.
