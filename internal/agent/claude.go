@@ -40,12 +40,26 @@ type IdeaContext struct {
 	AddDirs []string // additional directories for --add-dir
 }
 
-// buildClaudeEnv merges user-configured env overrides into the parent
-// process environment. User cfg.Env entries are appended last so they
-// win over inherited values via last-occurrence semantics.
+// buildClaudeEnv builds the env for a claude PTY subprocess. The parent
+// env is inherited and then layered with Ideate's terminal identity
+// (TERM/COLORTERM) and any user-configured overrides.
+//
+// TERM and COLORTERM are forced to xterm.js's emulation capability, not
+// inherited. From the subprocess's perspective Ideate IS the terminal —
+// whatever the parent shell happened to advertise is irrelevant. Dock
+// launches inherit neither (causing claude to render monochrome); some
+// shells set TERM=dumb (same outcome via a different path). User config
+// (cfg.Env) still wins via last-occurrence on the env slice, so anyone
+// who genuinely needs a different TERM can pin it in agents.claude.env.
 func buildClaudeEnv(parentEnv []string, cfg store.ClaudeAgent) []string {
-	out := make([]string, len(parentEnv), len(parentEnv)+len(cfg.Env))
-	copy(out, parentEnv)
+	out := make([]string, 0, len(parentEnv)+2+len(cfg.Env))
+	for _, kv := range parentEnv {
+		if strings.HasPrefix(kv, "TERM=") || strings.HasPrefix(kv, "COLORTERM=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out, "TERM=xterm-256color", "COLORTERM=truecolor")
 	for k, v := range cfg.Env {
 		out = append(out, k+"="+v)
 	}
@@ -281,6 +295,12 @@ func (r *TestAgentRunner) Run(_ context.Context, config SessionConfig, outputFun
 
 	cmd := exec.Command(bin, testArgs...)
 	cmd.Dir = config.WorkingDir
+	// Inherit env unchanged — testagent's Bubble Tea TUI parses
+	// stdin differently when TERM advertises full xterm capability
+	// (alt-screen, raw input mode), breaking the playwright tests
+	// that drive `/exit` and other slash commands via page.keyboard.type.
+	// The PTY env override for color rendering lives in buildClaudeEnv
+	// and only applies to the real claude runner.
 	cmd.Env = os.Environ()
 	cmd.SysProcAttr = newSysProcAttr()
 
