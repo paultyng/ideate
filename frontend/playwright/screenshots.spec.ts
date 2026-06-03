@@ -301,9 +301,13 @@ test.describe('Screenshots', () => {
       status: 'pending',
       created: new Date().toISOString(),
       comments: [
+        // Anchor on a real diff line in the current fixture range
+        // (2a34f59...06f17d5 = PR #14 icon swap). IdeaSession.tsx is in
+        // the diff; line 237 is the inline Folio "i" SVG block — visible
+        // in the rendered hunk so `.review-comment-thread` actually renders.
         {
-          path: 'frontend/playwright/dashboard.spec.ts',
-          line: 215,
+          path: 'frontend/src/views/IdeaSession.tsx',
+          line: 237,
           side: 'RIGHT',
           body: 'Worth adding a sibling test for the case where the user explicitly toggled the drawer open before nav?',
         },
