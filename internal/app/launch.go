@@ -10,11 +10,17 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 
 	"github.com/paultyng/ideate/frontend"
+	ideatecfg "github.com/paultyng/ideate/internal/config"
 	"github.com/paultyng/ideate/internal/version"
 )
 
 // Launch starts the Wails application with the given launch config.
 func Launch(config LaunchConfig) error {
+	// File logging is set up before App.New() so any slog calls during
+	// store load / coordinator init also land on disk.
+	closeLog := setupFileLogging(ideatecfg.LogsDir(ideatecfg.DefaultConfigDir()))
+	defer closeLog()
+
 	a := New(config)
 
 	width, height := 1200, 800
