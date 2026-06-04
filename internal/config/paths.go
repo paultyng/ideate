@@ -54,6 +54,14 @@ func ReviewsDir(configDir string) string {
 	return filepath.Join(configDir, "reviews")
 }
 
+// LogsDir returns the directory where slog output is tee'd to disk so
+// production crashes/errors are recoverable. Dock-launched .app bundles
+// have no visible stderr; this gives users a file to attach to bug
+// reports.
+func LogsDir(configDir string) string {
+	return filepath.Join(configDir, "logs")
+}
+
 // DefaultClaudeProjectsDir returns the directory where Claude Code stores
 // per-session JSONL transcripts. Respects IDEATE_CLAUDE_PROJECTS_DIR for
 // dev/test isolation.
