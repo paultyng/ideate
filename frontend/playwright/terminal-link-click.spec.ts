@@ -63,9 +63,11 @@ async function getCapturedURLs(page: import('@playwright/test').Page): Promise<O
 // a drawer resize the buffer reflows asynchronously (FitAddon → xterm
 // render loop), and during that window the OSC 8 metadata briefly detaches
 // from the visible cells — locally it settles in <50ms, but the macOS-14
-// CI runner has been observed taking longer. waitForFunction polls every
-// ~100ms and resolves the moment xterm reapplies the metadata, so we add
-// zero waste on a fast settle and stay deterministic on a slow one.
+// CI runner has been observed taking longer (the post-merge run of PR #22
+// blew through a 5s timeout three times in a row on the drawer hide/show
+// variant). Default to 15s; waitForFunction polls every ~100ms and resolves
+// the moment xterm reapplies the metadata, so we add zero waste on a fast
+// settle and stay deterministic on a slow one.
 //
 // Plain-URL tests (WebLinksAddon) don't set `urlId` — the matcher attaches
 // the link region per-line at render time, with no cell attribute. Pass
@@ -77,7 +79,7 @@ async function clickLinkRow(
   linkText: string,
   options: { requireOscLink?: boolean; timeoutMs?: number } = {},
 ): Promise<boolean> {
-  const { requireOscLink = false, timeoutMs = 5000 } = options
+  const { requireOscLink = false, timeoutMs = 15000 } = options
   const handle = page.locator(containerSelector)
   await handle.waitFor({ state: 'visible' })
   const screen = handle.locator('.xterm-screen').first()
