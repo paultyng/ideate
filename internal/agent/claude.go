@@ -303,13 +303,12 @@ func (r *TestAgentRunner) Run(_ context.Context, config SessionConfig, outputFun
 
 	cmd := exec.Command(bin, testArgs...)
 	cmd.Dir = config.WorkingDir
-	// Inherit env unchanged — testagent's Bubble Tea TUI parses
-	// stdin differently when TERM advertises full xterm capability
-	// (alt-screen, raw input mode), breaking the playwright tests
-	// that drive `/exit` and other slash commands via page.keyboard.type.
-	// The PTY env override for color rendering lives in buildClaudeEnv
-	// and only applies to the real claude runner.
-	cmd.Env = os.Environ()
+	// DEBUG: route testagent through buildClaudeEnv too — diagnostic to
+	// test whether CI's empty TERM/COLORTERM is what makes testagent
+	// strip OSC 8 escapes during render. Earlier reverted because of 3
+	// /exit-keystroke test regressions; this push re-tests against the
+	// PR #20 (fixme'd OSC 8) + PR #17 (SessionHeader) main state.
+	cmd.Env = buildClaudeEnv(os.Environ(), store.ClaudeAgent{})
 	cmd.SysProcAttr = newSysProcAttr()
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
