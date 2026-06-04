@@ -303,13 +303,21 @@ func (r *TestAgentRunner) Run(_ context.Context, config SessionConfig, outputFun
 
 	cmd := exec.Command(bin, testArgs...)
 	cmd.Dir = config.WorkingDir
-	// Inherit env unchanged — testagent's Bubble Tea TUI parses
-	// stdin differently when TERM advertises full xterm capability
-	// (alt-screen, raw input mode), breaking the playwright tests
-	// that drive `/exit` and other slash commands via page.keyboard.type.
-	// The PTY env override for color rendering lives in buildClaudeEnv
-	// and only applies to the real claude runner.
-	cmd.Env = os.Environ()
+	// Reuse claude's env-builder so testagent gets the same terminal
+	// identity (TERM=xterm-256color, COLORTERM=truecolor). The macOS-14
+	// CI runner's wails dev inherits an empty TERM, which makes
+	// testagent's lipgloss/termenv rendering downgrade — it strips
+	// OSC 8 hyperlinks (and other capability-gated escapes) before
+	// they hit the PTY, so xterm.js never sees urlId metadata on cells
+	// and the link-click tests hang waiting for it.
+	//
+	// Earlier (PR #16) we reverted this on a hypothesis that full TUI
+	// mode broke /exit-keystroke tests. Re-tested on PR #17's
+	// SessionHeader fix + PR #19's retries: 132 passed cleanly with
+	// TERM set, including all three OSC 8 link-click tests we'd
+	// fixme'd. The original revert was masking the real cause of those
+	// other regressions (which PR #17 fixed).
+	cmd.Env = buildClaudeEnv(os.Environ(), store.ClaudeAgent{})
 	cmd.SysProcAttr = newSysProcAttr()
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
