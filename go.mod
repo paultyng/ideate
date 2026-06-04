@@ -88,4 +88,4 @@ tool github.com/paultyng/testagent
 
 replace github.com/charmbracelet/x/vt => github.com/toller892/x/vt v0.0.0-20260601191830-4fbcadcb407e
 
-replace github.com/paultyng/testagent => github.com/paultyng/testagent v0.3.2-0.20260603203614-f41a11797aeb
+replace github.com/paultyng/testagent => github.com/paultyng/testagent v0.3.2-0.20260604005830-bd8be62740f1
