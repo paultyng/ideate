@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Coffee, Cpu, Home } from 'lucide-react'
-import { ListIdeas, ListSessionSummaries, GetSleepState, SetSleepEnabled, StartIdeaSession } from '../wailsjs/go/app/App'
+import { ListIdeas, ListSessionSummaries, GetSleepState, SetSleepEnabled } from '../wailsjs/go/app/App'
+import { resolveSessionTarget, useNavigateToIdeaSession } from '../lib/sessionNav'
 import { model, store } from '../wailsjs/go/models'
 import IdeaStatusIcon from './IdeaStatusIcon'
 import SessionStatusIcon from './SessionStatusIcon'
@@ -128,6 +129,7 @@ const PINNED_MRU = '￿' // U+FFFF — sorts after any normal-range char
 
 export default function CommandPalette({ open, onClose }: Props) {
   const navigate = useNavigate()
+  const navigateToSession = useNavigateToIdeaSession()
   const [ideas, setIdeas] = useState<model.Idea[]>([])
   const [summaries, setSummaries] = useState<Record<string, store.IdeaSessionSummary>>({})
   const [sleepEnabled, setSleepEnabled] = useState<boolean>(false)
@@ -229,14 +231,9 @@ export default function CommandPalette({ open, onClose }: Props) {
       .filter((i) => i.status !== 'archived')
       .map((idea): NavEntry => {
         const sessions = summaries[idea.slug]
-        const runningList = sessions?.running ?? []
-        const running = runningList.length > 0
-          ? runningList.reduce((a, b) => ((a.started || '') > (b.started || '') ? a : b))
-          : undefined
-        const dormantList = sessions?.dormant ?? []
-        const dormant = !running && dormantList.length > 0
-          ? dormantList.reduce((a, b) => ((a.started || '') > (b.started || '') ? a : b))
-          : undefined
+        const target = resolveSessionTarget(sessions)
+        const running = target.kind === 'running' ? target.session : undefined
+        const dormant = target.kind === 'dormant' ? target.session : undefined
         const summaryLine = sessions?.ideaSummary?.line?.trim() || undefined
         const meta = running ? (
           <>
@@ -265,41 +262,14 @@ export default function CommandPalette({ open, onClose }: Props) {
           meta,
           searchAliases: sessions?.repoNames,
           activate: () => {
-            // Always steer focus into the destination terminal — if
-            // the user was already on the route (re-selecting the
-            // session they're "on" from the orchestrator terminal),
-            // navigate() is a no-op and the focus-restore would
-            // bounce them back to the orchestrator. Clear the
-            // restore target and explicitly focus the destination.
+            // Clear the focus-restore target so re-selecting the
+            // session the user is currently "on" doesn't bounce them
+            // back to the orchestrator terminal. The shared helper
+            // takes it from there: running → navigate + focus,
+            // dormant → resume + navigate + focus, else → idea.
             restoreFocusRef.current = null
             onClose()
-            if (running) {
-              navigate(`/idea/${idea.slug}/session/${running.uuid}`)
-              setTimeout(() => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const reg = (window as any).__ideateTerminals as Record<string, { focus?: () => void }> | undefined
-                reg?.[running.uuid]?.focus?.()
-              }, 0)
-              return
-            }
-            if (dormant) {
-              // Resume first so the session record flips to running
-              // before the view mounts — otherwise IdeaSession reads
-              // status=dormant and renders the completed-session
-              // metadata branch instead of the live terminal.
-              void StartIdeaSession(idea.slug, dormant.agent, true)
-                .then(() => {
-                  navigate(`/idea/${idea.slug}/session/${dormant.uuid}`)
-                  setTimeout(() => {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const reg = (window as any).__ideateTerminals as Record<string, { focus?: () => void }> | undefined
-                    reg?.[dormant.uuid]?.focus?.()
-                  }, 0)
-                })
-                .catch(() => navigate(`/idea/${idea.slug}`))
-              return
-            }
-            navigate(`/idea/${idea.slug}`)
+            void navigateToSession(idea.slug, sessions)
           },
         }
       })
