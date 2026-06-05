@@ -1,4 +1,4 @@
-import { useNavigateToIdeaSession } from '../lib/sessionNav'
+import { resolveSessionTarget, useNavigateToIdeaSession } from '../lib/sessionNav'
 import { model, store } from '../wailsjs/go/models'
 import CardShell from './CardShell'
 import SessionStatusIcon from './SessionStatusIcon'
@@ -67,15 +67,11 @@ export default function IdeaCard({ idea, sessions }: Props) {
   const running = sessions?.running ?? []
   const mostRecent = sessions?.mostRecent
   // Single-target rule: prefer running session → auto-resume dormant
-  // → otherwise open idea detail. Quick-switcher uses the same shape
-  // via lib/sessionNav so all three entry points stay aligned.
-  const runningSession = running.length > 0
-    ? running.reduce((a, b) => ((a.started || '') > (b.started || '') ? a : b))
-    : undefined
-  const dormantList = sessions?.dormant ?? []
-  const dormantSession = !runningSession && dormantList.length > 0
-    ? dormantList.reduce((a, b) => ((a.started || '') > (b.started || '') ? a : b))
-    : undefined
+  // → otherwise open idea detail. Resolved via the shared helper so
+  // home card + quick switcher + idea-detail topbar all stay aligned.
+  const target = resolveSessionTarget(sessions)
+  const runningSession = target.kind === 'running' ? target.session : undefined
+  const dormantSession = target.kind === 'dormant' ? target.session : undefined
   const navigateToSession = useNavigateToIdeaSession()
 
   // Worst-case activity drives the card-level dot — waiting > active > idle.

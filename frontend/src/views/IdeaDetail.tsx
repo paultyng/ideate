@@ -206,6 +206,13 @@ export default function IdeaDetail() {
       .catch(() => setFileContent('(failed to load file)'))
   }, [slug, selectedFile, idea])
 
+  // Hook must run on every render path — invoking it after the early
+  // returns below trips React's Rules of Hooks (different call order
+  // between loading/error and the loaded state, "Rendered more hooks
+  // than during the previous render"). Stable identity from useCallback
+  // inside the hook, so it's free.
+  const navigateToSession = useNavigateToIdeaSession()
+
   if (loading) return <div className="idea-detail-loading">Loading...</div>
   if (error) return <div className="idea-detail-error">{error}</div>
   if (!idea || !slug) return <div className="idea-detail-error">Idea not found</div>
@@ -233,7 +240,6 @@ export default function IdeaDetail() {
     : dormantSession
       ? 'Resume dormant session'
       : 'Open most recent session'
-  const navigateToSession = useNavigateToIdeaSession()
   const navResumableSessions = {
     running: runningSession ? [runningSession] : [],
     dormant: dormantSession ? [dormantSession] : [],
