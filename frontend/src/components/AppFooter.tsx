@@ -104,7 +104,9 @@ export default function AppFooter() {
         <PendingReviewsBar />
       </div>
       <div className="app-footer-system">
-        {status && <span>v{status.version}</span>}
+        {/* version.Version already carries the leading 'v' from `git
+            describe --tags` (e.g. "v0.1.3"); don't prepend a second one. */}
+        {status && <span>{status.version}</span>}
         {status && debug && <span>uptime {status.uptime}</span>}
         {sleepToggle}
       </div>

@@ -49,10 +49,11 @@ test.describe('Dashboard', () => {
     // reserve space for it.
     await page.waitForSelector('.app-footer', { timeout: 5000 })
     // Version comes from internal/version.Version (ldflags-injected
-    // at build time, "dev" under `wails dev`). Assert presence of a
-    // `v<token>` instead of a literal so this stays correct across
-    // dev runs and tagged release builds alike.
-    await expect(page.locator('.app-footer')).toContainText(/v\S+/)
+    // at build time from `git describe --tags`, "dev" under
+    // `wails dev`). The footer renders the value as-is — tagged
+    // builds already carry the leading 'v' from git-describe, dev
+    // builds render "dev". Match either shape.
+    await expect(page.locator('.app-footer')).toContainText(/v\d|dev/)
   })
 
   // Idea cards prefer the headless-generated summary sidecar (line
