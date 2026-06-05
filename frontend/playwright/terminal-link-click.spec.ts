@@ -104,10 +104,14 @@ async function clickLinkRow(
       if (!elem) continue
       if (!root.contains(elem)) continue
       const buf = term.buffer.active
-      const start: number = buf.viewportY
-      const candidates: Array<{ row: number; col: number; hasOscLink: boolean }> = []
-      for (let visible = 0; visible < term.rows; visible++) {
-        const line = buf.getLine(start + visible)
+      // Search the FULL buffer (scrollback + visible). vscreen.Snapshot
+      // on a fresh xterm mount (drawer hide/show) emits scrollback + 24
+      // visible rows; xterm scrolls the top rows into its own scrollback
+      // when total > 24. The link can land in scrollback, so iterating
+      // only `viewportY..viewportY+rows` misses it.
+      const candidates: Array<{ absLine: number; col: number; hasOscLink: boolean }> = []
+      for (let i = 0; i < buf.length; i++) {
+        const line = buf.getLine(i)
         if (!line) continue
         const text: string = line.translateToString(true)
         const col = text.indexOf(needle)
@@ -119,16 +123,30 @@ async function clickLinkRow(
         const cell = line.getCell(probeCol)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const hasOscLink = !!(cell as any)?.extended?.urlId
-        candidates.push({ row: visible, col, hasOscLink })
+        candidates.push({ absLine: i, col, hasOscLink })
       }
       if (candidates.length === 0) continue
-      const oscRow = candidates.find((c) => c.hasOscLink)
+      const oscMatch = candidates.find((c) => c.hasOscLink)
       // OSC 8 tests require a cell with urlId or the click won't fire
       // linkHandler.activate. Return null so waitForFunction keeps polling
       // while xterm settles the buffer.
-      if (requireOscLink && !oscRow) continue
-      const pick = oscRow ?? candidates[0]
-      return { row: pick.row, col: pick.col, totalRows: term.rows, totalCols: term.cols }
+      if (requireOscLink && !oscMatch) continue
+      const pick = oscMatch ?? candidates[0]
+      // If the line is in scrollback (above viewportY), scroll xterm
+      // up so the line is in the visible viewport — we can only click
+      // visible cells. scrollLines(-N) scrolls N lines up.
+      const viewportY = buf.viewportY
+      if (pick.absLine < viewportY) {
+        const linesUp = viewportY - pick.absLine
+        term.scrollLines(-linesUp)
+      } else if (pick.absLine >= viewportY + term.rows) {
+        const linesDown = pick.absLine - (viewportY + term.rows - 1)
+        term.scrollLines(linesDown)
+      }
+      // After scrolling, the line is at row (pick.absLine - new viewportY).
+      const newViewportY = term.buffer.active.viewportY
+      const row = pick.absLine - newViewportY
+      return { row, col: pick.col, totalRows: term.rows, totalCols: term.cols }
     }
     return null
   }
@@ -332,14 +350,7 @@ test.describe('Terminal link clicks', () => {
       .toContain('https://example.com/plain-url?via=weblinks-after-drag')
   })
 
-  // SKIP under testagent v0.6.3: clickLinkRow returns false after the
-  // drawer hide/show cycle — vscreen.Snapshot's OSC 8 escape replay
-  // round-trip doesn't produce clickable cells in the remounted
-  // xterm under inline rendering. The basic "orchestrator drawer"
-  // and "after drawer drag" OSC 8 tests still pass, so the regression
-  // is specific to the hide → snapshot → show → click path. Tracked
-  // in backlog.
-  test.fixme('OSC 8 hyperlink click routes through openExternal after drawer hide/show', async ({ page }) => {
+  test('OSC 8 hyperlink click routes through openExternal after drawer hide/show', async ({ page }) => {
     // Off-dashboard route so the orchestrator toggle button isn't
     // disabled-by-pinning (dashboard pins the drawer open). The
     // drawer starts closed on /idea/new; an initial click opens it.
@@ -379,11 +390,7 @@ test.describe('Terminal link clicks', () => {
       .toContain('https://example.com/from-testagent?via=osc8-after-hide-show')
   })
 
-  // SKIP under testagent v0.6.3: same root cause as the OSC 8
-  // sibling above — drawer hide/show breaks click-region detection
-  // in the remounted xterm under inline rendering. Tracked in
-  // backlog.
-  test.fixme('plain http URL click routes through openExternal after drawer hide/show', async ({ page }) => {
+  test('plain http URL click routes through openExternal after drawer hide/show', async ({ page }) => {
     // Off-dashboard route — see sibling hide/show test for why.
     await page.goto('/#/idea/new')
     await enablePtyCapture(page)
