@@ -303,7 +303,10 @@ test.describe('Dashboard', () => {
       }
       return lines.join('\n')
     })
-    expect(text).toContain('Type anything')
+    // mcp-connected lifecycle marker reliably appears in both
+    // vscreen and xterm.js direct reads; see waitForAgentReady's
+    // comment in ptyCapture.ts for why we don't poll the banner.
+    expect(text).toContain('mcp connected:')
 
     // Click again to close.
     await page.click('button[aria-label="Orchestrator"]')

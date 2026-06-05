@@ -462,7 +462,9 @@ test.describe('Idea Session Flow', () => {
 
     const readTerminalText = () => readSessionReplay(page, uuid)
 
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('Type anything')
+    // mcp-connected lifecycle marker — see waitForAgentReady's comment
+    // for why this is the readiness signal instead of the banner text.
+    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
 
     await page.locator('.terminal-container').click()
     await page.keyboard.type('line1', { delay: 100 })
