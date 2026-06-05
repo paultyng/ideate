@@ -234,14 +234,16 @@ export default function IdeaSession() {
         aria-label="Back to idea"
         onClick={() => navigate(`/idea/${slug}`)}
       >
-        {/* Inline Folio "i" — echoes the app icon's serif-i-with-dot mark.
-            Single-color (currentColor) so it inherits the button's text
-            color and stays visually aligned with the lucide icons used
-            elsewhere in the toolbar. Background square from the app icon
-            is omitted; the toolbar button supplies its own framing. */}
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <circle cx="8" cy="3" r="1.75" />
-          <path d="M5 6 H11 V7 H9 V13 H11 V14 H5 V13 H7 V7 H5 Z" />
+        {/* Inline italic 'i' matching the app icon mark: enlarged amber
+            tittle (evokes a lightbulb sphere), no top serif, slight
+            italic lean, left-biased bottom serif. The app icon's
+            "threading" serifs between tittle and stem don't render
+            legibly at 14px so they're dropped here — the bulb + italic
+            stem still convey the same intent. */}
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="4" r="2" fill="#c8883a" />
+          <path d="M6.5 7 L8 7 L9 13 L7.5 13 Z" fill="currentColor" />
+          <path d="M5.5 12.5 L9.5 12.5 L9.5 13.5 L5.5 13.5 Z" fill="currentColor" />
         </svg>
       </button>
       {completedSession && (

@@ -1,20 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <!-- Warm rounded-rect background: #211e1a, 12% corner radius = 122.88px -->
   <rect x="0" y="0" width="1024" height="1024" rx="123" ry="123" fill="#211e1a"/>
-  <!-- Italic lowercase 'i' in a Newsreader-ish serif. Hand-crafted paths,
-       not a font glyph, so the .icns conversion doesn't need a font face.
-       Three pieces:
-        1. Slanted stem (~10 degree lean — visible as italic but not slanting off-axis).
-        2. Bottom serif (asymmetric bracket, wider on the left to balance the lean).
-        3. Amber tittle, centered above the stem top following the italic axis.
-       No top serif: a real italic lowercase 'i' has just the tittle at the top. -->
-  <!-- Stem: top x [438..520], bottom x [510..592], height 410 → ~10° lean. -->
-  <path d="M 438 310 L 520 310 L 592 720 L 510 720 Z" fill="#e8dfd0"/>
-  <!-- Bottom serif: bracket extending more to the left (italic 'i' serifs
-       typically lean opposite the stem to anchor the glyph visually). -->
-  <path d="M 458 710 L 614 710 L 614 740 L 458 740 Z" fill="#e8dfd0"/>
-  <!-- Amber tittle. Centered on the stem-top's italic-axis projection:
-       stem-top center x ≈ 479; lean carries the visual center ~7px right at
-       the tittle height (~80px above the stem), so cx ≈ 486. -->
-  <circle cx="486" cy="232" r="58" fill="#c8883a"/>
+  <!-- Italic lowercase 'i' designed to EVOKE a lightbulb without being
+       literal:
+        - Enlarged amber tittle reads as a bulb sphere (vs the old small dot).
+        - Two slanted parallelogram serifs below the tittle hint at screw
+          threading connecting the bulb to its base.
+        - The italic stem + left-biased bottom serif keep the letterform
+          intact at small icon sizes — at 16/32px the threading collapses
+          into pleasant horizontal banding but the bulb + i still read.
+       Vertical position is centered in the canvas (~190px margin top,
+       ~194px bottom) so the glyph doesn't float top-heavy at Dock sizes. -->
+  <!-- Italic stem: ~10° lean, 410..810 vertical. -->
+  <path d="M 438 410 L 520 410 L 592 810 L 510 810 Z" fill="#e8dfd0"/>
+  <!-- Bottom serif: left-biased bracket (italic stems lean right, serif
+       counterweights left). -->
+  <path d="M 458 800 L 614 800 L 614 830 L 458 830 Z" fill="#e8dfd0"/>
+  <!-- Threading serif 1 (upper, slight slant matching the stem axis). -->
+  <path d="M 430 360 L 540 360 L 552 380 L 442 380 Z" fill="#e8dfd0"/>
+  <!-- Threading serif 2 (lower, parallel to #1, ~25px below). -->
+  <path d="M 434 385 L 550 385 L 562 405 L 446 405 Z" fill="#e8dfd0"/>
+  <!-- Amber 'bulb' tittle: r=80 (was 58) so it reads as a sphere, not a dot. -->
+  <circle cx="486" cy="270" r="80" fill="#c8883a"/>
 </svg>
