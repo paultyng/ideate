@@ -5,31 +5,34 @@
   <!-- Italic lowercase 'i' designed to evoke a lightbulb without being
        literal:
         - Enlarged amber tittle (r=90) reads as a bulb sphere.
-        - Three stacked top serifs between the tittle and the stem hint
-          at screw threading connecting the bulb to its base.
+        - Three stacked top serifs between the tittle and the stem
+          hint at screw threading connecting the bulb to its base.
         - One bottom serif at the foot. All 4 serifs share the same
           shape (height 17, l/r edges sloped 0.18 = ~10° matching the
-          stem's italic axis, top-left corner anchored on the stem's
-          left edge at that y).
-        - The bottommost top serif (#3) fuses with the stem top
-          (bottom-left lands exactly on the stem's top-left corner).
-          The bottom serif fuses with the stem bottom the same way.
-       Vertically and horizontally centered in the 1024x1024 canvas
-       (~195px margin top / 194px bottom, span centered on x=512). -->
+          stem's italic axis, top-left anchored on the stem's left
+          edge at that y).
+        - Uniform 14px gap between bulb↓ → serif 1↑, serif 1↓ →
+          serif 2↑, serif 2↓ → serif 3↑, and serif 3↓ → stem↑. The
+          gap pattern reads as deliberate threading rhythm at Dock
+          size and survives down to Finder thumbnail.
+        - Bottom serif fuses with the stem bottom (its bottom-left
+          at y=856 lands exactly on the stem's bottom-left corner).
+       Centered both axes: ~169px top/bottom margins, glyph bounding
+       box centered on x=512. -->
 
-  <!-- Italic stem: y=430-830, lean 72/400 ≈ 10° -->
-  <path d="M 432 430 L 514 430 L 586 830 L 504 830 Z" fill="#e8dfd0"/>
+  <!-- Italic stem: y=456-856, lean 72/400 ≈ 10° -->
+  <path d="M 432 456 L 514 456 L 586 856 L 504 856 Z" fill="#e8dfd0"/>
 
-  <!-- Top serif 1 (topmost, touches tittle): y=375-392 -->
-  <path d="M 422.1 375 L 552.1 375 L 555.16 392 L 425.16 392 Z" fill="#e8dfd0"/>
+  <!-- Top serif 1 (closest to tittle): y=363-380 -->
+  <path d="M 415.26 363 L 545.26 363 L 548.32 380 L 418.32 380 Z" fill="#e8dfd0"/>
   <!-- Top serif 2: y=394-411 -->
-  <path d="M 425.52 394 L 555.52 394 L 558.58 411 L 428.58 411 Z" fill="#e8dfd0"/>
-  <!-- Top serif 3: y=413-430, fuses stem top (bottom-left = 432) -->
-  <path d="M 428.94 413 L 558.94 413 L 562 430 L 432 430 Z" fill="#e8dfd0"/>
+  <path d="M 420.84 394 L 550.84 394 L 553.90 411 L 423.90 411 Z" fill="#e8dfd0"/>
+  <!-- Top serif 3 (closest to stem): y=425-442 -->
+  <path d="M 426.42 425 L 556.42 425 L 559.48 442 L 429.48 442 Z" fill="#e8dfd0"/>
 
-  <!-- Bottom serif: y=813-830, fuses stem bottom (bottom-left = 504) -->
-  <path d="M 500.94 813 L 630.94 813 L 634 830 L 504 830 Z" fill="#e8dfd0"/>
+  <!-- Bottom serif: y=839-856, fuses stem bottom -->
+  <path d="M 500.94 839 L 630.94 839 L 634 856 L 504 856 Z" fill="#e8dfd0"/>
 
-  <!-- Amber 'bulb' tittle -->
-  <circle cx="480" cy="285" r="90" fill="#c8883a"/>
+  <!-- Amber 'bulb' tittle: r=90 -->
+  <circle cx="480" cy="259" r="90" fill="#c8883a"/>
 </svg>
