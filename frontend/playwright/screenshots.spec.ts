@@ -212,9 +212,10 @@ test.describe('Screenshots', () => {
     await page.waitForSelector('.orchestrator-host .terminal-container', { timeout: 10000 })
     await page.waitForSelector('.orchestrator-host .xterm-screen', { timeout: 5000 })
 
-    // Wait for testagent's banner to land in the orchestrator terminal
-    // so the subsequent transcript write happens after a stable
-    // baseline (banner box draws "╚" on its closing border row).
+    // Wait for testagent to finish booting (MCP connected + SessionStart
+    // fired) so the subsequent transcript write lands on a stable
+    // baseline. See waitForAgentReady's comment in ptyCapture.ts for
+    // why the banner-border check was replaced.
     await page.waitForFunction(
       () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -225,7 +226,7 @@ test.describe('Screenshots', () => {
         for (const term of Object.values(reg)) {
           const buf = term.buffer.active
           for (let i = 0; i < buf.length; i++) {
-            if (buf.getLine(i)?.translateToString(true).includes('╚')) return true
+            if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
           }
         }
         return false

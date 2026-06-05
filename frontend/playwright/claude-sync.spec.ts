@@ -37,7 +37,7 @@ async function startAndEndTestagent(page: import('@playwright/test').Page) {
       if (!reg) return false
       for (const term of Object.values(reg)) {
         for (let i = 0; i < term.buffer.active.length; i++) {
-          if (term.buffer.active.getLine(i)?.translateToString(true).includes('/help for commands')) return true
+          if (term.buffer.active.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
         }
       }
       return false

@@ -164,18 +164,35 @@ export async function waitForTerminalMount(
   )
 }
 
-// waitForAgentReady blocks until the upstream testagent banner has
-// fully landed on the agent's vscreen for `sessionId`. The TUI puts
-// stdin in raw mode only after Bubbletea finishes its first render;
-// PTY bytes written before then go through the kernel's line
+// waitForAgentReady blocks until the upstream testagent has finished
+// booting (MCP connected + SessionStart fired) for `sessionId`. The
+// TUI puts stdin in raw mode only after Bubbletea finishes its first
+// render; PTY bytes written before then go through the kernel's line
 // discipline and are silently dropped (or echoed). Tests that drive
 // slash commands via WriteToSession must wait for readiness first or
 // the input never reaches the agent.
 //
+// We poll for the `[mcp connected: N tools]` lifecycle marker, not
+// the banner's "/help for commands" hint:
+//   - testagent v0.4+ renders the TUI banner via bubbletea v2's
+//     inline mode, which uses \x1b[5L (Insert Lines) to push existing
+//     scrollback down and write the banner into the freed rows. Our
+//     vscreen vt-emulator handles IL inconsistently — the middle
+//     banner rows ("session <uuid>", "Type anything; /help for
+//     commands") don't reliably appear in vscreen, while the top
+//     border + title row + post-banner lifecycle markers do.
+//   - The `[mcp connected:` line is emitted after MCP.Connect()
+//     succeeds and is rendered via tea.Println (committed to native
+//     scrollback as a single line, not part of the IL block), so it
+//     lands in vscreen deterministically across v0.3.1 and v0.6.3.
+//   - It's also a stronger readiness signal: the agent isn't actually
+//     ready to accept slash commands until SessionStart has fired,
+//     which is bracketed by the MCP-connected line.
+//
 // Reads from the on-screen replay (not the raw capture stream)
-// because the banner is currently visible — using the replay keeps
-// readiness honest: if the banner scrolled off the screen for any
-// reason we want to know.
+// because the marker is currently visible — using the replay keeps
+// readiness honest: if it scrolled off the screen for any reason we
+// want to know.
 export async function waitForAgentReady(
   page: Page,
   sessionId: string,
@@ -184,10 +201,10 @@ export async function waitForAgentReady(
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const t = await readSessionReplay(page, sessionId)
-    if (t.includes('/help for commands')) return
+    if (t.includes('mcp connected:')) return
     await page.waitForTimeout(100)
   }
-  throw new Error(`waitForAgentReady: testagent banner not seen for ${sessionId} after ${timeoutMs}ms`)
+  throw new Error(`waitForAgentReady: testagent boot marker not seen for ${sessionId} after ${timeoutMs}ms`)
 }
 
 // readCapturedPty returns the cumulative ANSI-stripped text emitted
