@@ -171,6 +171,13 @@ func TestBuildClaudeEnv_TerminalIdentity(t *testing.T) {
 			if v, _ := envValLast(got, "COLORTERM"); v != tc.wantColor {
 				t.Errorf("COLORTERM = %q, want %q", v, tc.wantColor)
 			}
+			// FORCE_HYPERLINK is the supports-hyperlinks override.
+			// Must always be 1 (these cases don't set it in cfg.Env) so
+			// Dock-launched ideate gets OSC 8 escapes from claude even
+			// when TERM_PROGRAM / VTE_VERSION / WT_SESSION aren't set.
+			if v, _ := envValLast(got, "FORCE_HYPERLINK"); v != "1" {
+				t.Errorf("FORCE_HYPERLINK = %q, want %q", v, "1")
+			}
 		})
 	}
 }
