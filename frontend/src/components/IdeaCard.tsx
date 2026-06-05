@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigateToIdeaSession } from '../lib/sessionNav'
 import { model, store } from '../wailsjs/go/models'
 import CardShell from './CardShell'
 import SessionStatusIcon from './SessionStatusIcon'
@@ -61,21 +61,22 @@ interface Props {
 }
 
 export default function IdeaCard({ idea, sessions }: Props) {
-  const navigate = useNavigate()
   const date = parseDate(idea.slug, idea.updated, idea.created)
   const resourceCount = idea.resources?.length ?? 0
 
   const running = sessions?.running ?? []
   const mostRecent = sessions?.mostRecent
-  // Single-target rule: if the idea has a running session the card
-  // navigates there; otherwise it opens the idea detail page. No
-  // secondary click affordances on the card.
+  // Single-target rule: prefer running session → auto-resume dormant
+  // → otherwise open idea detail. Quick-switcher uses the same shape
+  // via lib/sessionNav so all three entry points stay aligned.
   const runningSession = running.length > 0
     ? running.reduce((a, b) => ((a.started || '') > (b.started || '') ? a : b))
     : undefined
-  const target = runningSession
-    ? `/idea/${idea.slug}/session/${runningSession.uuid}`
-    : `/idea/${idea.slug}`
+  const dormantList = sessions?.dormant ?? []
+  const dormantSession = !runningSession && dormantList.length > 0
+    ? dormantList.reduce((a, b) => ((a.started || '') > (b.started || '') ? a : b))
+    : undefined
+  const navigateToSession = useNavigateToIdeaSession()
 
   // Worst-case activity drives the card-level dot — waiting > active > idle.
   const dominantActivity = (() => {
@@ -134,9 +135,13 @@ export default function IdeaCard({ idea, sessions }: Props) {
   )
 
   // Left-rail class encodes status + session activity for CSS differentiation.
+  // Dormant gets its own rail color so the resumable affordance reads as
+  // distinct from a fully-terminated idea on the dashboard.
   const railClass = runningSession
     ? 'idea-card idea-card--running'
-    : `idea-card idea-card--${idea.status}`
+    : dormantSession
+      ? 'idea-card idea-card--dormant'
+      : `idea-card idea-card--${idea.status}`
 
   return (
     <CardShell
@@ -145,7 +150,7 @@ export default function IdeaCard({ idea, sessions }: Props) {
       summary={summary || undefined}
       body={body}
       meta={meta}
-      onActivate={() => navigate(target)}
+      onActivate={() => { void navigateToSession(idea.slug, sessions) }}
       ariaLabel={idea.name}
     />
   )
