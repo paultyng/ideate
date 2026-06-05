@@ -14,6 +14,7 @@ import HistoryPanel from '../components/HistoryPanel'
 import MarkdownViewer from '../components/MarkdownViewer'
 import TopbarActions from '../components/TopbarActions'
 import { openExternal } from '../lib/links'
+import { useNavigateToIdeaSession } from '../lib/sessionNav'
 import { Terminal, Plus, ArrowUp, ArrowDown, Circle, Play, ChevronRight, ChevronDown } from 'lucide-react'
 import SessionStatusIcon from '../components/SessionStatusIcon'
 
@@ -219,12 +220,24 @@ export default function IdeaDetail() {
     (b.started || '').localeCompare(a.started || ''),
   )
   const runningSession = sortedSessions.find((s) => s.status === 'running')
-  // Forward-nav target: prefer the running session so the terminal
-  // button always lands on something live when one exists. Falls back
-  // to the most-recent terminal record so the button still surfaces
-  // history for ideas with no running session. Hides entirely when
-  // there are no sessions at all.
-  const sessionNavTarget = runningSession || sortedSessions[0]
+  const dormantSession = !runningSession
+    ? sortedSessions.find((s) => s.status === 'dormant')
+    : undefined
+  // Forward-nav target: prefer the running session, then dormant
+  // (auto-resume on click via sessionNav helper), then fall back to
+  // the most-recent terminal record so the button still surfaces
+  // history. Hidden when there are no sessions at all.
+  const sessionNavTarget = runningSession || dormantSession || sortedSessions[0]
+  const navTitle = runningSession
+    ? 'Open running session'
+    : dormantSession
+      ? 'Resume dormant session'
+      : 'Open most recent session'
+  const navigateToSession = useNavigateToIdeaSession()
+  const navResumableSessions = {
+    running: runningSession ? [runningSession] : [],
+    dormant: dormantSession ? [dormantSession] : [],
+  }
   const sessionsCollapsed = sessionsCollapsedOverride ?? sortedSessions.length > 0
 
   return (
@@ -234,9 +247,21 @@ export default function IdeaDetail() {
           <button
             type="button"
             className="btn-back btn-nav-session"
-            title={runningSession ? 'Open running session' : 'Open most recent session'}
-            aria-label={runningSession ? 'Open running session' : 'Open most recent session'}
-            onClick={() => navigate(`/idea/${slug}/session/${sessionNavTarget.uuid}`)}
+            title={navTitle}
+            aria-label={navTitle}
+            onClick={() => {
+              // For a running or dormant target, route through the
+              // shared helper so dormant sessions auto-resume. For a
+              // fully-terminated most-recent fallback, the helper
+              // would navigate to idea-detail (where we already are);
+              // instead preserve the legacy "open the metadata view"
+              // direct nav so history stays browsable.
+              if (runningSession || dormantSession) {
+                void navigateToSession(slug, navResumableSessions)
+              } else {
+                navigate(`/idea/${slug}/session/${sessionNavTarget.uuid}`)
+              }
+            }}
           >
             <Terminal size={14} strokeWidth={1.75} />
           </button>

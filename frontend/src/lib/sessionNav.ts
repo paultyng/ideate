@@ -21,7 +21,16 @@
 import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { StartIdeaSession } from '../wailsjs/go/app/App'
-import type { model, store } from '../wailsjs/go/models'
+import type { model } from '../wailsjs/go/models'
+
+// Minimal sessions shape: just the two buckets the resolver cares about.
+// store.IdeaSessionSummary (used by dashboard / quick switcher) satisfies
+// this implicitly. IdeaDetail constructs one inline from its
+// AgentSession[] without the rest of the summary fields.
+export type ResumableSessions = {
+  running?: model.AgentSession[]
+  dormant?: model.AgentSession[]
+}
 
 export type SessionTarget =
   | { kind: 'running'; session: model.AgentSession }
@@ -39,7 +48,7 @@ function newestByStarted(list: model.AgentSession[]): model.AgentSession {
 // but at least one dormant, 'none' otherwise. Multiple in either bucket: newest
 // by `started` wins, matching the existing CommandPalette + IdeaCard logic.
 export function resolveSessionTarget(
-  sessions: store.IdeaSessionSummary | undefined,
+  sessions: ResumableSessions | undefined,
 ): SessionTarget {
   const runningList = sessions?.running ?? []
   if (runningList.length > 0) {
@@ -78,11 +87,11 @@ function focusTerminal(uuid: string): void {
 // manually.
 export function useNavigateToIdeaSession(): (
   slug: string,
-  sessions: store.IdeaSessionSummary | undefined,
+  sessions: ResumableSessions | undefined,
 ) => Promise<void> {
   const navigate = useNavigate()
   return useCallback(
-    async (slug: string, sessions: store.IdeaSessionSummary | undefined) => {
+    async (slug: string, sessions: ResumableSessions | undefined) => {
       const target = resolveSessionTarget(sessions)
       if (target.kind === 'running') {
         navigate(`/idea/${slug}/session/${target.session.uuid}`)
