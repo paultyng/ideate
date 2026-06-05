@@ -178,6 +178,12 @@ func TestBuildClaudeEnv_TerminalIdentity(t *testing.T) {
 			if v, _ := envValLast(got, "FORCE_HYPERLINK"); v != "1" {
 				t.Errorf("FORCE_HYPERLINK = %q, want %q", v, "1")
 			}
+			// CLAUDE_CODE_SUBPROCESS_ENV_SCRUB tells claude to strip
+			// credentials from tool subprocesses it spawns. Defense-
+			// in-depth alongside the shell-env harvest in app.Launch.
+			if v, _ := envValLast(got, "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"); v != "1" {
+				t.Errorf("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = %q, want %q", v, "1")
+			}
 		})
 	}
 }

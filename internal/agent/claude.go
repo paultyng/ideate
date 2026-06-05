@@ -41,8 +41,9 @@ type IdeaContext struct {
 }
 
 // buildClaudeEnv builds the env for a claude PTY subprocess. The parent
-// env is inherited and then layered with Ideate's terminal identity
-// (TERM/COLORTERM/FORCE_HYPERLINK) and any user-configured overrides.
+// env is inherited (post shell-env harvest from app.Launch) and then
+// layered with Ideate's terminal identity (TERM/COLORTERM/FORCE_HYPERLINK)
+// plus any user-configured overrides.
 //
 // TERM and COLORTERM are forced to xterm.js's emulation capability, not
 // inherited. From the subprocess's perspective Ideate IS the terminal —
@@ -57,20 +58,34 @@ type IdeaContext struct {
 // so xterm.js never receives OSC 8 escapes even though it supports them.
 // Same env-inheritance gap as the TERM/COLORTERM fix, different lib.
 //
+// CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 tells Claude Code to strip its
+// credentials (ANTHROPIC_API_KEY, session tokens) from subprocesses it
+// spawns for tool calls. With the shell-env harvest in app.Launch, our
+// process env now includes whatever credentials the user has exported
+// from .zprofile / .bashrc. Those reach claude (intentional — claude
+// needs the user's PATH / vars), but claude's tool subprocesses don't
+// need those creds.
+//
 // User config (cfg.Env) still wins via last-occurrence on the env slice,
 // so anyone who genuinely needs a different TERM can pin it in
 // agents.claude.env.
 func buildClaudeEnv(parentEnv []string, cfg store.ClaudeAgent) []string {
-	out := make([]string, 0, len(parentEnv)+3+len(cfg.Env))
+	out := make([]string, 0, len(parentEnv)+4+len(cfg.Env))
 	for _, kv := range parentEnv {
 		if strings.HasPrefix(kv, "TERM=") ||
 			strings.HasPrefix(kv, "COLORTERM=") ||
-			strings.HasPrefix(kv, "FORCE_HYPERLINK=") {
+			strings.HasPrefix(kv, "FORCE_HYPERLINK=") ||
+			strings.HasPrefix(kv, "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=") {
 			continue
 		}
 		out = append(out, kv)
 	}
-	out = append(out, "TERM=xterm-256color", "COLORTERM=truecolor", "FORCE_HYPERLINK=1")
+	out = append(out,
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
+		"FORCE_HYPERLINK=1",
+		"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1",
+	)
 	for k, v := range cfg.Env {
 		out = append(out, k+"="+v)
 	}

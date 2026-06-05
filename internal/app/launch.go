@@ -21,6 +21,16 @@ func Launch(config LaunchConfig) error {
 	closeLog := setupFileLogging(ideatecfg.LogsDir(ideatecfg.DefaultConfigDir()))
 	defer closeLog()
 
+	// Harvest the user's interactive shell env BEFORE anything else so
+	// every downstream subprocess (claude, testagent, MCP servers,
+	// summarizer) inherits the same PATH / locale / user-configured
+	// vars the user gets in their terminal. No-op when terminal-launched
+	// (the env is already correct) or when IDEATE_NO_SHELL_ENV=1.
+	// Closes the per-var Dock-launch patches (#16 TERM/COLORTERM,
+	// #22 testagent TERM, #26 FORCE_HYPERLINK) by giving subprocesses
+	// the correct env baseline.
+	ResolveShellEnv()
+
 	a := New(config)
 
 	width, height := 1200, 800
