@@ -197,7 +197,7 @@ existing search infrastructure and avoids the dual-write footgun.
         for (const term of Object.values(reg)) {
           const buf = term.buffer.active
           for (let i = 0; i < buf.length; i++) {
-            if (buf.getLine(i)?.translateToString(true).includes('╚')) return true
+            if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
           }
         }
         return false

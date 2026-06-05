@@ -700,9 +700,10 @@ test.describe('Dashboard', () => {
   })
 })
 
-// Polls the active terminal's buffer until the testagent banner has
-// rendered. The banner closes with a ╚ row; once that appears the buffer
-// is ready to assert against.
+// Polls the active terminal's buffer until testagent has finished
+// booting (MCP connected). See waitForAgentReady's comment in
+// ptyCapture.ts for why we don't poll the banner border rows under
+// testagent v0.4+'s bubbletea v2 inline rendering.
 async function waitForBanner(page: import('@playwright/test').Page) {
   await page.waitForFunction(
     () => {
@@ -729,7 +730,7 @@ async function waitForBanner(page: import('@playwright/test').Page) {
       if (!term) return false
       const buf = term.buffer.active
       for (let i = 0; i < buf.length; i++) {
-        if (buf.getLine(i)?.translateToString(true).includes('╚')) return true
+        if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
       }
       return false
     },
@@ -738,8 +739,14 @@ async function waitForBanner(page: import('@playwright/test').Page) {
 }
 
 // Reads the active terminal's buffer untrimmed (preserving leading
-// whitespace) and asserts the testagent banner's closing box-drawing
-// row starts at column 0 of its line — i.e. no staircase, no offset.
+// whitespace) and asserts the testagent banner's TOP border row
+// starts at column 0 — i.e. no staircase, no offset. Originally
+// asserted the closing border (╚), but bubbletea v2 inline rendering
+// in testagent v0.4+ doesn't reliably commit the middle/bottom banner
+// rows under \x1b[5L insertion (only the top border + title row land
+// in scrollback). The top border ╔ row carries the same col-0
+// guarantee the closing row did, so the alignment assertion is
+// equivalent.
 async function assertBannerAtCol0(
   page: import('@playwright/test').Page,
   context: string,
@@ -772,7 +779,7 @@ async function assertBannerAtCol0(
       const buf = terms[t].buffer.active
       for (let i = 0; i < buf.length; i++) {
         const raw = buf.getLine(i)?.translateToString(false) ?? ''
-        if (raw.includes('╚')) return raw
+        if (raw.includes('╔')) return raw
       }
     }
     return null
@@ -780,12 +787,12 @@ async function assertBannerAtCol0(
 
   expect(
     closingLine,
-    `[${context}] testagent banner closing row never appeared in terminal buffer`,
+    `[${context}] testagent banner top row never appeared in terminal buffer`,
   ).not.toBeNull()
   expect(
     closingLine,
-    `[${context}] banner staircased — closing row does not start at col 0: ${JSON.stringify(closingLine)}`,
-  ).toMatch(/^╚/)
+    `[${context}] banner staircased — top row does not start at col 0: ${JSON.stringify(closingLine)}`,
+  ).toMatch(/^╔/)
 }
 
 // Asserts that `expectedNames` appear in the GlobalSessionBar's

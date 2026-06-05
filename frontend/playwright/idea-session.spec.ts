@@ -72,7 +72,7 @@ async function waitForSessionEnd(page: import('@playwright/test').Page) {
       if (!reg) return false
       for (const term of Object.values(reg)) {
         for (let i = 0; i < term.buffer.active.length; i++) {
-          if (term.buffer.active.getLine(i)?.translateToString(true).includes('/help for commands')) return true
+          if (term.buffer.active.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
         }
       }
       return false
@@ -409,7 +409,7 @@ test.describe('Idea Session Flow', () => {
         const term = reg?.[id]
         if (!term) return false
         for (let i = 0; i < term.buffer.active.length; i++) {
-          if (term.buffer.active.getLine(i)?.translateToString(true).includes('/help for commands')) return true
+          if (term.buffer.active.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
         }
         return false
       },
@@ -488,7 +488,7 @@ test.describe('Idea Session Flow', () => {
     await page.waitForSelector('.xterm-screen', { timeout: 5000 })
 
     const uuid = await getMountedSessionId(page)
-    await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 }).toContain('/help for commands')
+    await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 }).toContain('mcp connected:')
 
     await page.locator('.terminal-container').click()
     await page.keyboard.type('/fake-tool Bash {"cmd":"echo hi"}', { delay: 50 })
@@ -518,7 +518,7 @@ test.describe('Idea Session Flow', () => {
     const uuid = await getMountedSessionId(page)
     const readTerminalText = () => readSessionReplay(page, uuid)
 
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('/help for commands')
+    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
 
     await page.locator('.terminal-container').click()
     await page.keyboard.type('/clear', { delay: 50 })
@@ -563,7 +563,7 @@ test.describe('Idea Session Flow', () => {
 
     const uuid = await getMountedSessionId(page)
     const readTerminalText = () => readSessionReplay(page, uuid)
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('/help for commands')
+    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
 
     await page.locator('.terminal-container').click()
     await page.keyboard.type('/compact', { delay: 50 })
@@ -607,7 +607,7 @@ test.describe('Idea Session Flow', () => {
     const uuid = await getMountedSessionId(page)
 
     const readTerminalText = () => readSessionReplay(page, uuid)
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('/help for commands')
+    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
 
     for (let i = 0; i < 12; i++) {
       await page.evaluate(({ id, n }) => {
@@ -642,7 +642,7 @@ test.describe('Idea Session Flow', () => {
     const uuid = await getMountedSessionId(page)
 
     const readTerminalText = () => readSessionReplay(page, uuid)
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('/help for commands')
+    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
 
     for (let i = 0; i < 12; i++) {
       await page.evaluate(({ id, n }) => {
