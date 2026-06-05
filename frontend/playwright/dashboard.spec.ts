@@ -444,15 +444,7 @@ test.describe('Dashboard', () => {
   // (╚...╝) NOT starting at column 0 of its line in the buffer. This
   // test toggles the drawer closed and back open to force a fresh
   // TerminalPanel mount + snapshot replay and asserts col-0 alignment.
-  // SKIP under testagent v0.6.3: in this test path,
-  // `App.StartRootSession('testagent')` followed by opening the
-  // orchestrator drawer leaves the drawer in the NEW-SESSION FORM
-  // state (Agent=claude-code default), not in a running-session
-  // terminal — confirmed via the failure screenshot. Either a real
-  // regression in StartRootSession's drawer attachment under v0.6.3
-  // or a test/cleanup race with stopAllRunningSessions's afterEach.
-  // Tracked in backlog.
-  test.fixme('orchestrator drawer re-mount preserves testagent banner col-0 alignment', async ({ page }) => {
+  test('orchestrator drawer re-mount preserves testagent banner col-0 alignment', async ({ page }) => {
     // Run on /idea/new so the drawer is toggle-controlled (pinned on
     // / would prevent the close + reopen step the test depends on).
     await page.goto('/#/idea/new')
@@ -487,10 +479,7 @@ test.describe('Dashboard', () => {
   // broadcast), the buffer renders at stale cell dims into the new
   // container, producing ghost rows and misaligned content for at
   // least one frame.
-  // SKIP under testagent v0.6.3: same root cause as the sibling
-  // re-mount test above — StartRootSession('testagent') leaves the
-  // drawer in form state on this code path. Tracked in backlog.
-  test.fixme('orchestrator drawer resize-then-hide-then-show preserves banner col-0 alignment', async ({ page }) => {
+  test('orchestrator drawer resize-then-hide-then-show preserves banner col-0 alignment', async ({ page }) => {
     // Run on /idea/new so the drawer is toggle-controlled (matches
     // the sibling drawer test's setup).
     await page.goto('/#/idea/new')

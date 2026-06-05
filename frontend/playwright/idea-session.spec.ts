@@ -196,14 +196,7 @@ test.describe('Idea Session Flow', () => {
     await expect(page.locator('.session-metadata')).toContainText('testagent')
   })
 
-  // SKIP under testagent v0.6.3: the /exit slash now produces a stop
-  // reason that Ideate's hooks handler maps to Status=stopped, not
-  // Status=completed. The test polls for .idea-sidebar-item.session.completed
-  // which never appears. Two paths to un-fixme: either broaden the
-  // sidebar CSS class match to include .stopped, or update Ideate's
-  // reason→status mapping for /exit ("logout" reason from testagent)
-  // to produce completed. Tracked in backlog.
-  test.fixme('resume button appears for resumable agent on completed session', async ({ page }) => {
+  test('resume button appears for resumable agent on completed session', async ({ page }) => {
     const slug = await createIdea(page, 'Resume Button Test')
 
     // Start and wait for testagent to complete

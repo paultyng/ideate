@@ -378,9 +378,27 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 		config.AgentUUID = sessionUUID
 	}
 
+	// Register the MCP server instance for this session BEFORE spawning
+	// the agent process. The agent connects to /mcp during boot; if the
+	// connect lands before RegisterSession runs, the MCP handler logs
+	// `mcp: unknown session` and returns 404, the agent's MCP client
+	// gives up, no "mcp connected:" line lands in the agent's output, and
+	// downstream tests that poll for boot-readiness time out. Race
+	// confirmed in test-ui run 27015848817 against testagent v0.6.3 for
+	// the resume-button-test session — the warn line landed 6ms after
+	// session-started, well before this point. nil guard matches the
+	// adopt path in app_lifecycle.go where unit tests construct App
+	// without the manager.
+	if a.mcpManager != nil {
+		a.mcpManager.RegisterSession(sessionUUID)
+	}
+
 	// Start the agent process BEFORE writing to the store. If start fails,
 	// no orphaned "running" records are left behind.
 	if _, err := a.coordinator.Start(a.ctx, config); err != nil {
+		if a.mcpManager != nil {
+			a.mcpManager.UnregisterSession(sessionUUID)
+		}
 		return nil, err
 	}
 
@@ -411,8 +429,6 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 				slog.Any("err", err))
 		}
 	}
-
-	a.mcpManager.RegisterSession(sessionUUID)
 
 	if err := a.svc.AppendHistory(a.ctx, slug, model.HistoryEvent{
 		Timestamp: time.Now(),
@@ -459,7 +475,19 @@ func (a *App) StartRootSession(agentType string) (*SessionStartResult, error) {
 		// hooks routing uses the synthetic OrchestratorSlug below.
 	}
 
+	// Register the orchestrator MCP server BEFORE spawning the agent.
+	// Same race as StartIdeaSession: the agent connects to /mcp during
+	// boot and a late-arriving RegisterRootSession leaves the connect
+	// returning 404 — no "mcp connected:" lands in the buffer and
+	// downstream readiness polling times out.
+	if a.mcpManager != nil {
+		a.mcpManager.RegisterRootSession(sessionUUID)
+	}
+
 	if _, err := a.coordinator.Start(a.ctx, config); err != nil {
+		if a.mcpManager != nil {
+			a.mcpManager.UnregisterSession(sessionUUID)
+		}
 		return nil, err
 	}
 
@@ -476,8 +504,6 @@ func (a *App) StartRootSession(agentType string) (*SessionStartResult, error) {
 		slog.Warn("writing orchestrator session record",
 			slog.String("uuid", sessionUUID), slog.Any("err", err))
 	}
-
-	a.mcpManager.RegisterRootSession(sessionUUID)
 
 	// Publish idea:changed for the orchestrator slug so the drawer's
 	// probe re-fires immediately. The fsnotify watcher would catch
