@@ -42,24 +42,35 @@ type IdeaContext struct {
 
 // buildClaudeEnv builds the env for a claude PTY subprocess. The parent
 // env is inherited and then layered with Ideate's terminal identity
-// (TERM/COLORTERM) and any user-configured overrides.
+// (TERM/COLORTERM/FORCE_HYPERLINK) and any user-configured overrides.
 //
 // TERM and COLORTERM are forced to xterm.js's emulation capability, not
 // inherited. From the subprocess's perspective Ideate IS the terminal —
 // whatever the parent shell happened to advertise is irrelevant. Dock
 // launches inherit neither (causing claude to render monochrome); some
-// shells set TERM=dumb (same outcome via a different path). User config
-// (cfg.Env) still wins via last-occurrence on the env slice, so anyone
-// who genuinely needs a different TERM can pin it in agents.claude.env.
+// shells set TERM=dumb (same outcome via a different path).
+//
+// FORCE_HYPERLINK=1 is the `supports-hyperlinks` library's documented
+// override. The library's auto-detection gates on TERM_PROGRAM /
+// VTE_VERSION / WT_SESSION / etc. — env vars set by host terminals
+// (Terminal.app, iTerm, vscode) but absent when ideate is Dock-launched,
+// so xterm.js never receives OSC 8 escapes even though it supports them.
+// Same env-inheritance gap as the TERM/COLORTERM fix, different lib.
+//
+// User config (cfg.Env) still wins via last-occurrence on the env slice,
+// so anyone who genuinely needs a different TERM can pin it in
+// agents.claude.env.
 func buildClaudeEnv(parentEnv []string, cfg store.ClaudeAgent) []string {
-	out := make([]string, 0, len(parentEnv)+2+len(cfg.Env))
+	out := make([]string, 0, len(parentEnv)+3+len(cfg.Env))
 	for _, kv := range parentEnv {
-		if strings.HasPrefix(kv, "TERM=") || strings.HasPrefix(kv, "COLORTERM=") {
+		if strings.HasPrefix(kv, "TERM=") ||
+			strings.HasPrefix(kv, "COLORTERM=") ||
+			strings.HasPrefix(kv, "FORCE_HYPERLINK=") {
 			continue
 		}
 		out = append(out, kv)
 	}
-	out = append(out, "TERM=xterm-256color", "COLORTERM=truecolor")
+	out = append(out, "TERM=xterm-256color", "COLORTERM=truecolor", "FORCE_HYPERLINK=1")
 	for k, v := range cfg.Env {
 		out = append(out, k+"="+v)
 	}
