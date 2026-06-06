@@ -529,13 +529,14 @@ test.describe('Markdown Review', () => {
     // MarkdownReview.tsx) to dispatch a NodeSelection at the code_block
     // position directly. This exercises exactly what the production
     // listenerCtx.selectionUpdated hook sees.
-    const moved = await page.evaluate(() => {
+    // Poll the helper — Crepe's editor ctx may take a tick after the
+    // editor-mounted DOM appears before the editor view is bound to
+    // ctx, so a single call can race the init.
+    await expect.poll(() => page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fn = (window as any).__milkdownSelectFirstCodeBlock as (() => boolean) | undefined
-      if (!fn) throw new Error('__milkdownSelectFirstCodeBlock not exposed by MarkdownReview')
-      return fn()
-    })
-    expect(moved).toBe(true)
+      return fn ? fn() : false
+    }), { timeout: 5000 }).toBe(true)
     await page.waitForTimeout(100)
     await expect(insertBtn).toBeDisabled()
     await expect(deleteBtn).toBeDisabled()

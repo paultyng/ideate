@@ -175,21 +175,33 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
     // CriticMarkup buttons' disabled state) into the code_block path.
     // Same affordance pattern as TerminalPanel.window.__ideateTerminals
     // and GlobalSessionBar.window.__ideateBarOrder.
-    crepe.editor.action((ctx) => {
-      const view = ctx.get(editorViewCtx)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(window as any).__milkdownSelectFirstCodeBlock = (): boolean => {
-        let pos: number | null = null
-        view.state.doc.descendants((node, p) => {
-          if (node.type.name === 'code_block') { pos = p; return false }
-          return true
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window as any).__milkdownSelectFirstCodeBlock = (): boolean => {
+      // Re-fetch the view from the live ctx on each invocation —
+      // capturing it at editor-init time produced an undefined
+      // view.state in CI when the helper ran before crepe.create()
+      // had fully bound the view.
+      let ok = false
+      try {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx)
+          if (!view?.state?.doc) return
+          let pos: number | null = null
+          view.state.doc.descendants((node, p) => {
+            if (node.type.name === 'code_block') { pos = p; return false }
+            return true
+          })
+          if (pos === null) return
+          const sel = NodeSelection.create(view.state.doc, pos)
+          view.dispatch(view.state.tr.setSelection(sel))
+          ok = true
         })
-        if (pos === null) return false
-        const sel = NodeSelection.create(view.state.doc, pos)
-        view.dispatch(view.state.tr.setSelection(sel))
-        return true
+      } catch {
+        // crepe.editor.action throws if the editor hasn't initialized
+        // yet — caller should poll / retry.
       }
-    })
+      return ok
+    }
     if (!isPending) {
       crepe.setReadonly(true)
     }
