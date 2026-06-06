@@ -514,17 +514,28 @@ test.describe('Markdown Review', () => {
     const deleteBtn = page.locator('[data-testid="cm-delete-btn"]')
     const commentBtn = page.locator('[data-testid="cm-comment-btn"]')
 
-    // Caret in the first paragraph → all 3 enabled.
+    // Caret in the first paragraph → all 3 enabled (clicking a paragraph
+    // moves PM's selection there directly).
     await page.locator('.milkdown p').first().click()
     await page.waitForTimeout(100)
     await expect(insertBtn).not.toBeDisabled()
     await expect(deleteBtn).not.toBeDisabled()
     await expect(commentBtn).not.toBeDisabled()
 
-    // Caret inside the code block → all 3 disabled.
-    // Crepe / Milkdown renders code_block content as a <pre><code>;
-    // clicking the code text lands the caret inside the block.
-    await page.locator('.milkdown pre').first().click()
+    // Caret inside the code block → all 3 disabled. Crepe wraps fenced
+    // code blocks in a CodeMirror Web Component that doesn't sync into
+    // ProseMirror's selection on focus; we use the
+    // __milkdownSelectFirstCodeBlock test affordance (see
+    // MarkdownReview.tsx) to dispatch a NodeSelection at the code_block
+    // position directly. This exercises exactly what the production
+    // listenerCtx.selectionUpdated hook sees.
+    const moved = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fn = (window as any).__milkdownSelectFirstCodeBlock as (() => boolean) | undefined
+      if (!fn) throw new Error('__milkdownSelectFirstCodeBlock not exposed by MarkdownReview')
+      return fn()
+    })
+    expect(moved).toBe(true)
     await page.waitForTimeout(100)
     await expect(insertBtn).toBeDisabled()
     await expect(deleteBtn).toBeDisabled()

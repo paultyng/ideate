@@ -21,7 +21,7 @@ import {
   collapseToSubstitutions,
   OPEN_COMMENT_MODAL_EVENT,
 } from '../criticmarkup'
-import type { Command as ProseCommand } from '@milkdown/prose/state'
+import { NodeSelection, type Command as ProseCommand } from '@milkdown/prose/state'
 import { buildCriticMarkupToolbar } from '../criticmarkup/toolbar'
 import '../criticmarkup/style.css'
 import { splitFrontmatter } from '../lib/frontmatter'
@@ -165,6 +165,31 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
     })
     crepeRef.current = crepe
     crepe.create().catch((err) => setError(`editor init failed: ${String(err)}`))
+
+    // Test affordance: expose a helper that moves PM's selection into
+    // the first code_block node. Crepe wraps fenced code blocks in a
+    // CodeMirror Web Component that doesn't sync its focus into
+    // ProseMirror's selection automatically, and there's no stable DOM
+    // target for "click inside the code block." Tests call this helper
+    // to drive the selectionUpdated listener (which gates the
+    // CriticMarkup buttons' disabled state) into the code_block path.
+    // Same affordance pattern as TerminalPanel.window.__ideateTerminals
+    // and GlobalSessionBar.window.__ideateBarOrder.
+    crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(window as any).__milkdownSelectFirstCodeBlock = (): boolean => {
+        let pos: number | null = null
+        view.state.doc.descendants((node, p) => {
+          if (node.type.name === 'code_block') { pos = p; return false }
+          return true
+        })
+        if (pos === null) return false
+        const sel = NodeSelection.create(view.state.doc, pos)
+        view.dispatch(view.state.tr.setSelection(sel))
+        return true
+      }
+    })
     if (!isPending) {
       crepe.setReadonly(true)
     }
@@ -198,6 +223,8 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
       } catch {
         /* editor may not have completed init — ignore */
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__milkdownSelectFirstCodeBlock
       void crepe.destroy()
       crepeRef.current = null
     }
