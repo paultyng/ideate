@@ -86,6 +86,12 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
   // re-attaches the (possibly source-edited) frontmatter on unmount.
   const [currentContent, setCurrentContent] = useState(seededContent)
   const [commentAnchor, setCommentAnchor] = useState<{ x: number; y: number } | null>(null)
+  // True when the caret / selection's parent is a non-inline block
+  // (code_block, html_block, etc.) — CriticMarkup marks/atoms are
+  // inline:true and ProseMirror silently no-ops the dispatch when
+  // the parent doesn't accept inline content. Disabling the mark
+  // buttons in that case beats a silent failure.
+  const [marksDisabled, setMarksDisabled] = useState(false)
   // bodyVersion bumps on every WYSIWYG doc change (via the Milkdown
   // listener plugin) so the autosave effect can debounce off it without
   // pulling the body out of Crepe on every keystroke.
@@ -141,6 +147,20 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
         // bare-open of a pending review doesn't immediately read as
         // dirty. Subsequent edits all carry a non-empty prev.
         if (prev !== '') setHasEdited(true)
+      })
+      // Track when the caret enters / leaves a non-inline parent
+      // (code_block, etc.) so the Insert / Delete / Comment buttons
+      // can disable themselves. CriticMarkup marks + the comment atom
+      // are inline:true and silently no-op when the parent doesn't
+      // accept inline content; disabling the affordance avoids the
+      // silent failure mode.
+      ctx.get(listenerCtx).selectionUpdated((_ctx, selection) => {
+        const parent = selection.$from.parent
+        // The atom check is conservative: most non-inline blocks
+        // (code_block, html_block) report inlineContent=false. Text
+        // nodes inside paragraphs / headings / blockquotes etc.
+        // report true.
+        setMarksDisabled(!parent.type.inlineContent)
       })
     })
     crepeRef.current = crepe
@@ -386,10 +406,13 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
             <button
               className="cm-mark-btn cm-mark-btn-insertion"
               data-testid="cm-insert-btn"
+              disabled={marksDisabled}
               onClick={() =>
                 runMarkCommand((ctx) => toggleInsertionCommand(insertionSchema.type(ctx)))
               }
-              title="Toggle insertion on selection (⌘⇧I)"
+              title={marksDisabled
+                ? "CriticMarkup can't apply inside code blocks"
+                : 'Toggle insertion on selection (⌘⇧I)'}
             >
               <Plus size={12} strokeWidth={2.5} />
               Insert
@@ -397,10 +420,13 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
             <button
               className="cm-mark-btn cm-mark-btn-deletion"
               data-testid="cm-delete-btn"
+              disabled={marksDisabled}
               onClick={() =>
                 runMarkCommand((ctx) => toggleDeletionCommand(deletionSchema.type(ctx)))
               }
-              title="Toggle deletion on selection (⌘⇧K)"
+              title={marksDisabled
+                ? "CriticMarkup can't apply inside code blocks"
+                : 'Toggle deletion on selection (⌘⇧K)'}
             >
               <Minus size={12} strokeWidth={2.5} />
               Delete
@@ -408,8 +434,11 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
             <button
               className="cm-mark-btn cm-mark-btn-comment"
               data-testid="cm-comment-btn"
+              disabled={marksDisabled}
               onClick={() => openCommentPopover()}
-              title="Insert comment at cursor (⌘⇧N)"
+              title={marksDisabled
+                ? "CriticMarkup can't apply inside code blocks"
+                : 'Insert comment at cursor (⌘⇧N)'}
             >
               <MessageCircle size={12} strokeWidth={2.5} />
               Comment

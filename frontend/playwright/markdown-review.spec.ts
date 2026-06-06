@@ -496,6 +496,49 @@ test.describe('Markdown Review', () => {
     expect(r.markdown.marked_up).not.toContain('{>>')
   })
 
+  // CriticMarkup marks + comment atom are inline:true; ProseMirror's
+  // default code_block accepts only text children, so dispatch silently
+  // no-ops there. The toolbar buttons disable themselves when the caret
+  // enters a code_block (and re-enable on exit) so users see the limit
+  // instead of clicking a no-op.
+  test('Insert/Delete/Comment buttons disable inside code blocks', async ({ page }) => {
+    seedMarkdownReview(
+      'playwright-md-codeblock-disable',
+      '# Test\n\nA paragraph for context.\n\n```ts\nconst x = 1\n```\n\nAnother paragraph.\n',
+    )
+    await page.goto('/#/review?reviewId=playwright-md-codeblock-disable')
+    await page.waitForSelector('[data-testid="markdown-review-editor"]', { timeout: 15000 })
+    await expect(page.locator('.milkdown')).toContainText('A paragraph for context', { timeout: 10000 })
+
+    const insertBtn = page.locator('[data-testid="cm-insert-btn"]')
+    const deleteBtn = page.locator('[data-testid="cm-delete-btn"]')
+    const commentBtn = page.locator('[data-testid="cm-comment-btn"]')
+
+    // Caret in the first paragraph → all 3 enabled.
+    await page.locator('.milkdown p').first().click()
+    await page.waitForTimeout(100)
+    await expect(insertBtn).not.toBeDisabled()
+    await expect(deleteBtn).not.toBeDisabled()
+    await expect(commentBtn).not.toBeDisabled()
+
+    // Caret inside the code block → all 3 disabled.
+    // Crepe / Milkdown renders code_block content as a <pre><code>;
+    // clicking the code text lands the caret inside the block.
+    await page.locator('.milkdown pre').first().click()
+    await page.waitForTimeout(100)
+    await expect(insertBtn).toBeDisabled()
+    await expect(deleteBtn).toBeDisabled()
+    await expect(commentBtn).toBeDisabled()
+    await expect(commentBtn).toHaveAttribute('title', /code blocks/)
+
+    // Caret in the trailing paragraph → re-enabled.
+    await page.locator('.milkdown p').last().click()
+    await page.waitForTimeout(100)
+    await expect(insertBtn).not.toBeDisabled()
+    await expect(deleteBtn).not.toBeDisabled()
+    await expect(commentBtn).not.toBeDisabled()
+  })
+
   test('seeded {++ ++} CriticMarkup renders as insertion mark and round-trips', async ({ page }) => {
     seedMarkdownReview(
       'playwright-md-roundtrip',
