@@ -1259,6 +1259,14 @@ p {
   padding-left: 14px; /* compensate for the extra 2px left border */
 }
 
+/* Dormant: idle session that one card-click will auto-resume. Muted
+   accent so it reads as "resumable" — between running (full accent +
+   glow) and a fully-terminated card (status border). */
+.idea-card--dormant {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  padding-left: 14px;
+}
+
 .idea-card--active {
   border-left: 3px solid var(--fg-muted);
   padding-left: 14px;
