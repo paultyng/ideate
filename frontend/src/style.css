@@ -2522,6 +2522,19 @@ p {
   background: var(--surface-hover);
 }
 
+/* Disabled state: caret inside a code_block / other non-inline parent.
+   CriticMarkup marks + the comment atom can't apply there, so the
+   button is greyed + cursor:not-allowed to telegraph the limitation
+   instead of silently no-oping the dispatch. */
+.cm-mark-btn:disabled,
+.cm-mark-btn:disabled:hover {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--fg-muted);
+}
+
 .cm-mark-btn-insertion {
   border-color: color-mix(in srgb, var(--success) 40%, transparent);
   color: #81c784;

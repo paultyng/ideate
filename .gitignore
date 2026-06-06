@@ -83,3 +83,4 @@ AuthKey_*.p8
 
 # Local release artifacts (.dmg, .app, intermediate signatures)
 dist/
+.plans/

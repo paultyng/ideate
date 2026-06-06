@@ -21,7 +21,7 @@ import {
   collapseToSubstitutions,
   OPEN_COMMENT_MODAL_EVENT,
 } from '../criticmarkup'
-import type { Command as ProseCommand } from '@milkdown/prose/state'
+import { NodeSelection, type Command as ProseCommand } from '@milkdown/prose/state'
 import { buildCriticMarkupToolbar } from '../criticmarkup/toolbar'
 import '../criticmarkup/style.css'
 import { splitFrontmatter } from '../lib/frontmatter'
@@ -86,6 +86,12 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
   // re-attaches the (possibly source-edited) frontmatter on unmount.
   const [currentContent, setCurrentContent] = useState(seededContent)
   const [commentAnchor, setCommentAnchor] = useState<{ x: number; y: number } | null>(null)
+  // True when the caret / selection's parent is a non-inline block
+  // (code_block, html_block, etc.) — CriticMarkup marks/atoms are
+  // inline:true and ProseMirror silently no-ops the dispatch when
+  // the parent doesn't accept inline content. Disabling the mark
+  // buttons in that case beats a silent failure.
+  const [marksDisabled, setMarksDisabled] = useState(false)
   // bodyVersion bumps on every WYSIWYG doc change (via the Milkdown
   // listener plugin) so the autosave effect can debounce off it without
   // pulling the body out of Crepe on every keystroke.
@@ -142,9 +148,60 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
         // dirty. Subsequent edits all carry a non-empty prev.
         if (prev !== '') setHasEdited(true)
       })
+      // Track when the caret enters / leaves a non-inline parent
+      // (code_block, etc.) so the Insert / Delete / Comment buttons
+      // can disable themselves. CriticMarkup marks + the comment atom
+      // are inline:true and silently no-op when the parent doesn't
+      // accept inline content; disabling the affordance avoids the
+      // silent failure mode.
+      ctx.get(listenerCtx).selectionUpdated((_ctx, selection) => {
+        const parent = selection.$from.parent
+        // The atom check is conservative: most non-inline blocks
+        // (code_block, html_block) report inlineContent=false. Text
+        // nodes inside paragraphs / headings / blockquotes etc.
+        // report true.
+        setMarksDisabled(!parent.type.inlineContent)
+      })
     })
     crepeRef.current = crepe
     crepe.create().catch((err) => setError(`editor init failed: ${String(err)}`))
+
+    // Test affordance: expose a helper that moves PM's selection into
+    // the first code_block node. Crepe wraps fenced code blocks in a
+    // CodeMirror Web Component that doesn't sync its focus into
+    // ProseMirror's selection automatically, and there's no stable DOM
+    // target for "click inside the code block." Tests call this helper
+    // to drive the selectionUpdated listener (which gates the
+    // CriticMarkup buttons' disabled state) into the code_block path.
+    // Same affordance pattern as TerminalPanel.window.__ideateTerminals
+    // and GlobalSessionBar.window.__ideateBarOrder.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window as any).__milkdownSelectFirstCodeBlock = (): boolean => {
+      // Re-fetch the view from the live ctx on each invocation —
+      // capturing it at editor-init time produced an undefined
+      // view.state in CI when the helper ran before crepe.create()
+      // had fully bound the view.
+      let ok = false
+      try {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx)
+          if (!view?.state?.doc) return
+          let pos: number | null = null
+          view.state.doc.descendants((node, p) => {
+            if (node.type.name === 'code_block') { pos = p; return false }
+            return true
+          })
+          if (pos === null) return
+          const sel = NodeSelection.create(view.state.doc, pos)
+          view.dispatch(view.state.tr.setSelection(sel))
+          ok = true
+        })
+      } catch {
+        // crepe.editor.action throws if the editor hasn't initialized
+        // yet — caller should poll / retry.
+      }
+      return ok
+    }
     if (!isPending) {
       crepe.setReadonly(true)
     }
@@ -178,6 +235,8 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
       } catch {
         /* editor may not have completed init — ignore */
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (window as any).__milkdownSelectFirstCodeBlock
       void crepe.destroy()
       crepeRef.current = null
     }
@@ -386,10 +445,13 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
             <button
               className="cm-mark-btn cm-mark-btn-insertion"
               data-testid="cm-insert-btn"
+              disabled={marksDisabled}
               onClick={() =>
                 runMarkCommand((ctx) => toggleInsertionCommand(insertionSchema.type(ctx)))
               }
-              title="Toggle insertion on selection (⌘⇧I)"
+              title={marksDisabled
+                ? "CriticMarkup can't apply inside code blocks"
+                : 'Toggle insertion on selection (⌘⇧I)'}
             >
               <Plus size={12} strokeWidth={2.5} />
               Insert
@@ -397,10 +459,13 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
             <button
               className="cm-mark-btn cm-mark-btn-deletion"
               data-testid="cm-delete-btn"
+              disabled={marksDisabled}
               onClick={() =>
                 runMarkCommand((ctx) => toggleDeletionCommand(deletionSchema.type(ctx)))
               }
-              title="Toggle deletion on selection (⌘⇧K)"
+              title={marksDisabled
+                ? "CriticMarkup can't apply inside code blocks"
+                : 'Toggle deletion on selection (⌘⇧K)'}
             >
               <Minus size={12} strokeWidth={2.5} />
               Delete
@@ -408,8 +473,11 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
             <button
               className="cm-mark-btn cm-mark-btn-comment"
               data-testid="cm-comment-btn"
+              disabled={marksDisabled}
               onClick={() => openCommentPopover()}
-              title="Insert comment at cursor (⌘⇧N)"
+              title={marksDisabled
+                ? "CriticMarkup can't apply inside code blocks"
+                : 'Insert comment at cursor (⌘⇧N)'}
             >
               <MessageCircle size={12} strokeWidth={2.5} />
               Comment
