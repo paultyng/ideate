@@ -811,6 +811,19 @@ func (m *Manager) handleSendSessionInput(sessionID string) server.ToolHandlerFun
 			return mcp.NewToolResultError(fmt.Sprintf("session %q not live after resume attempt", targetUUID)), nil
 		}
 
+		// Resumed dormant sessions need a moment for the agent process
+		// to boot, enter its TUI, and put stdin in raw mode before the
+		// PTY can receive input. Skipping this wait drops bytes through
+		// the kernel's line discipline before the agent claims it —
+		// same race shape as PR #25's MCP-connect issue, different
+		// stage. Live targets were presumed-ready by the caller, so
+		// skip the wait there to avoid pointless latency.
+		if resumed {
+			if err := waitForAgentReady(ctx, m.resolver, targetUUID, resolvedAgentReadyTimeout()); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("session resumed but agent not ready: %v (retry send_session_input or check get_session_output)", err)), nil
+			}
+		}
+
 		// Pick the prefix variant. include_reply_hint defaults to true
 		// so the receiver learns about the reverse channel; pass false
 		// for one-way fire-and-forget sends where a reply isn't useful.
