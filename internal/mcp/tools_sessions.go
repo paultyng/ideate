@@ -195,8 +195,10 @@ func (m *Manager) handleStartIdeaSession(sessionID string) server.ToolHandlerFun
 				// uuid so the caller can decide to retry via
 				// send_session_input or surface to the user.
 				body, mErr := json.Marshal(map[string]any{
-					"uuid":                 uuid,
-					"initial_prompt_error": err.Error(),
+					"uuid":                     uuid,
+					"initial_prompt_delivered": false,
+					"initial_prompt_submitted": false,
+					"initial_prompt_error":     err.Error(),
 				})
 				if mErr != nil {
 					return mcp.NewToolResultError(fmt.Sprintf("marshaling: %v", mErr)), nil
