@@ -48,6 +48,12 @@ func TestMatchAgentReadyMarker(t *testing.T) {
 			wantMarker: "❯ ",
 		},
 		{
+			name:       "testagent banner ready line",
+			data:       []byte("welcome to testagent\n/help for commands\n"),
+			wantMatch:  true,
+			wantMarker: "/help for commands",
+		},
+		{
 			name:       "neither marker present",
 			data:       []byte("starting...\nloading config\n"),
 			wantMatch:  false,

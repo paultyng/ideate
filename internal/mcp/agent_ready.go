@@ -36,6 +36,10 @@ var ErrAgentNotReady = errors.New("agent not ready: prompt marker not observed w
 var agentReadyMarkers = [][]byte{
 	[]byte("❯ "), // claude TUI idle prompt (❯ + space)
 	[]byte("mcp connected:"),
+	// testagent banner's last line — fires whether or not MCP is
+	// wired, unlike "mcp connected:". See coordinator_test.go which
+	// uses the same string as its "tui is ready" signal.
+	[]byte("/help for commands"),
 }
 
 // defaultAgentReadyTimeout is the polling ceiling before we give up.
