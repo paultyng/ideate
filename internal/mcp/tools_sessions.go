@@ -157,7 +157,9 @@ func startIdeaSessionTool() mcp.Tool {
 	}
 }
 
-func (m *Manager) handleStartIdeaSession() server.ToolHandlerFunc {
+// sessionID is the caller's session UUID, recorded as source_session in
+// the session_initial_prompt history event. Empty for non-session callers.
+func (m *Manager) handleStartIdeaSession(sessionID string) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		m.mu.RLock()
 		starter := m.starter
@@ -209,6 +211,23 @@ func (m *Manager) handleStartIdeaSession() server.ToolHandlerFunc {
 				return mcp.NewToolResultError(fmt.Sprintf("writing initial_prompt: %v", err)), nil
 			}
 			initialPromptDelivered = true
+
+			// Best-effort: prompt already landed; don't fail the call on a history write.
+			if err := m.store.AppendHistory(ctx, slug, model.HistoryEvent{
+				Timestamp: time.Now().UTC(),
+				Event:     "session_initial_prompt",
+				Session:   uuid,
+				Fields: map[string]any{
+					"source_session": sessionID,
+					"text":           initialPrompt,
+					"submitted":      initialPromptSubmit,
+				},
+			}); err != nil {
+				slog.Warn("appending session_initial_prompt history event",
+					slog.String("slug", slug),
+					slog.String("uuid", uuid),
+					slog.Any("err", err))
+			}
 		}
 
 		response := map[string]any{
