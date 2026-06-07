@@ -143,6 +143,14 @@ func startIdeaSessionTool() mcp.Tool {
 					"type":        "boolean",
 					"description": "If true, resume the most recent terminated session for this (slug, agent_type). Default false.",
 				},
+				"initial_prompt": map[string]any{
+					"type":        "string",
+					"description": "Optional. If non-empty, typed into the new session's prompt buffer once the agent is ready (boot + TUI raw-mode set up). Use for fire-and-forget orchestrator briefings.",
+				},
+				"initial_prompt_submit": map[string]any{
+					"type":        "boolean",
+					"description": "If true (default), submit the initial_prompt as the first turn. If false, leave it in the prompt buffer for the user to review and submit manually. Ignored when initial_prompt is empty.",
+				},
 			},
 			Required: []string{"slug"},
 		},
@@ -150,7 +158,7 @@ func startIdeaSessionTool() mcp.Tool {
 }
 
 func (m *Manager) handleStartIdeaSession() server.ToolHandlerFunc {
-	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		m.mu.RLock()
 		starter := m.starter
 		m.mu.RUnlock()
@@ -163,14 +171,54 @@ func (m *Manager) handleStartIdeaSession() server.ToolHandlerFunc {
 		}
 		agentType := request.GetString("agent_type", "claude-code")
 		resume := request.GetBool("resume", false)
+		initialPrompt := request.GetString("initial_prompt", "")
+		initialPromptSubmit := request.GetBool("initial_prompt_submit", true)
 
 		uuid, err := starter.StartIdeaSession(slug, agentType, resume)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("start_idea_session: %v", err)), nil
 		}
-		body, err := json.Marshal(map[string]any{
+
+		// If the caller supplied an initial prompt, wait for the
+		// agent's TUI to come up before typing — fresh sessions race
+		// the same boot window dormant-resume hits in
+		// send_session_input. Writes before the agent claims stdin go
+		// to the kernel's line discipline and are silently dropped.
+		// Empty prompt skips the wait entirely (no write needed; saves
+		// up to defaultAgentReadyTimeout on fast-path callers).
+		initialPromptDelivered := false
+		if initialPrompt != "" {
+			if err := waitForAgentReady(ctx, m.resolver, uuid, resolvedAgentReadyTimeout()); err != nil {
+				// Session is up but the prompt didn't land. Return the
+				// uuid so the caller can decide to retry via
+				// send_session_input or surface to the user.
+				body, mErr := json.Marshal(map[string]any{
+					"uuid":                 uuid,
+					"initial_prompt_error": err.Error(),
+				})
+				if mErr != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("marshaling: %v", mErr)), nil
+				}
+				return mcp.NewToolResultText(string(body)), nil
+			}
+			// Empty prefix: the initial prompt is the user's first
+			// turn, not an orchestrator-routed reply. The
+			// send_session_input wrapper "orchestrator: ..." is for
+			// cross-session attribution and is wrong here.
+			if err := m.writeBufferedInput(uuid, "", initialPrompt, initialPromptSubmit); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("writing initial_prompt: %v", err)), nil
+			}
+			initialPromptDelivered = true
+		}
+
+		response := map[string]any{
 			"uuid": uuid,
-		})
+		}
+		if initialPrompt != "" {
+			response["initial_prompt_delivered"] = initialPromptDelivered
+			response["initial_prompt_submitted"] = initialPromptDelivered && initialPromptSubmit
+		}
+		body, err := json.Marshal(response)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("encoding result: %v", err)), nil
 		}
