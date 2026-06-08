@@ -206,8 +206,12 @@ func TestSession_NaturalExitWritesSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	snapPath := filepath.Join(dir, "test.snapshot.ans")
 
-	// printf writes output then exits — natural process exit, no Stop().
-	cmd := exec.Command("printf", "natural-exit-marker\r\n")
+	// Writes output then sleeps briefly before exiting. The sleep lets
+	// readLoop drain the PTY into vscreen before EOF arrives — without
+	// it, a contended scheduler (CI macOS-14, parallel agent tests)
+	// can race readLoop's return against the natural exit and snapshot
+	// an empty buffer. See backlog 01c99406.
+	cmd := exec.Command("sh", "-c", "printf 'natural-exit-marker\\r\\n'; sleep 0.1")
 	cmd.SysProcAttr = newSysProcAttr()
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
