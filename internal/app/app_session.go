@@ -462,6 +462,14 @@ func (a *App) StartRootSession(agentType string) (*SessionStartResult, error) {
 	}
 
 	if existingUUID := a.coordinator.FindRunningSessionForDir(workingDir); existingUUID != "" {
+		// Caller asked to start; we're handing back an in-flight session
+		// instead. Surface this so CI artifacts capture cross-test leaks
+		// when subsequent assertions key on fresh-session state (banner
+		// scrollback, MCP-connect marker position, etc.).
+		slog.Info("StartRootSession: reusing existing running session",
+			slog.String("uuid", existingUUID),
+			slog.String("agent_type", agentType),
+			slog.String("working_dir", workingDir))
 		return &SessionStartResult{UUID: existingUUID}, nil
 	}
 
