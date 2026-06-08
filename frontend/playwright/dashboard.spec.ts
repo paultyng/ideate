@@ -706,37 +706,67 @@ test.describe('Dashboard', () => {
 // ptyCapture.ts for why we don't poll the banner border rows under
 // testagent v0.4+'s bubbletea v2 inline rendering.
 async function waitForBanner(page: import('@playwright/test').Page) {
-  await page.waitForFunction(
-    () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as
-        | Record<
-            string,
-            {
-              buffer: {
-                active: {
-                  length: number
-                  getLine: (
-                    i: number,
-                  ) =>
-                    | { translateToString: (trim: boolean) => string }
-                    | undefined
+  try {
+    await page.waitForFunction(
+      () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const reg = (window as any).__ideateTerminals as
+          | Record<
+              string,
+              {
+                buffer: {
+                  active: {
+                    length: number
+                    getLine: (
+                      i: number,
+                    ) =>
+                      | { translateToString: (trim: boolean) => string }
+                      | undefined
+                  }
                 }
               }
+            >
+          | undefined
+        if (!reg) return false
+        // Check every registered terminal — pick-first-by-insertion-order
+        // raced against a brief route-transition overlap where a stale
+        // terminal could still be registered ahead of the newly-mounted
+        // one. Mirrors assertBannerAtCol0's defensive iteration.
+        for (const term of Object.values(reg)) {
+          const buf = term.buffer.active
+          for (let i = 0; i < buf.length; i++) {
+            if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) {
+              return true
             }
-          >
+          }
+        }
+        return false
+      },
+      { timeout: 5000 },
+    )
+  } catch (err) {
+    // Diagnostic on timeout: dump every registered terminal's buffer so
+    // future CI artifacts carry the data needed to diagnose this flake.
+    const dump = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const reg = (window as any).__ideateTerminals as
+        | Record<string, { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }>
         | undefined
-      if (!reg) return false
-      const term = Object.values(reg)[0]
-      if (!term) return false
-      const buf = term.buffer.active
-      for (let i = 0; i < buf.length; i++) {
-        if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
-      }
-      return false
-    },
-    { timeout: 5000 },
-  )
+      if (!reg) return '(no __ideateTerminals registered)'
+      const ids = Object.keys(reg)
+      if (ids.length === 0) return '(0 terminals registered)'
+      return ids.map((id) => {
+        const buf = reg[id].buffer.active
+        const lines: string[] = []
+        for (let i = 0; i < buf.length; i++) {
+          lines.push(buf.getLine(i)?.translateToString(true) ?? '')
+        }
+        return `--- terminal ${id} (${buf.length} lines) ---\n${lines.join('\n')}`
+      }).join('\n\n')
+    })
+    console.error(`waitForBanner timed out — terminal buffer dump:\n${dump}`)
+    throw err
+  }
 }
 
 // Reads the active terminal's buffer untrimmed (preserving leading
