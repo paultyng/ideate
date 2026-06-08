@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import * as fs from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 import { stopAllRunningSessions } from './ptyCapture'
 
@@ -13,28 +14,25 @@ import { stopAllRunningSessions } from './ptyCapture'
 // rendered content. Failure surfaces both as DOM assertions and a
 // screenshot artifact under test-results/ so we can see what state
 // the chip ended up in even when an assertion is the surface failure.
+//
+// Review creation goes through App.RequestMarkdownReview — the same
+// path the live UI exercises. An earlier version of this spec wrote
+// review records directly to disk, which bypassed the `review:changed`
+// Wails event PendingReviewsBar listens for, so the bar never updated
+// in tests even when its event-wiring was broken in production. See
+// docs/test-drift-audit.md.
 
-const REPO_PATH = process.env.TEST_DIFF_REPO || process.cwd().replace('/frontend', '')
-const REVIEWS_DIR = process.env.TEST_REVIEWS_DIR
-  || path.join(process.env.IDEATE_CONFIG_DIR || path.join(REPO_PATH, '.ideate-dev'), 'reviews')
-
-function seedMarkdownReview(id: string, original: string): void {
-  fs.mkdirSync(REVIEWS_DIR, { recursive: true, mode: 0o700 })
-  const record = {
-    id,
-    kind: 'markdown',
-    status: 'pending',
-    created: new Date().toISOString(),
-    markdown: {
-      path: '/tmp/test/' + id + '.md',
-      original,
-    },
-  }
-  fs.writeFileSync(path.join(REVIEWS_DIR, `${id}.json`), JSON.stringify(record, null, 2) + '\n', { mode: 0o600 })
-}
-
-function cleanReview(id: string): void {
-  try { fs.unlinkSync(path.join(REVIEWS_DIR, `${id}.json`)) } catch { /* ignore */ }
+async function requestMarkdownReview(page: import('@playwright/test').Page, fileContent: string): Promise<string> {
+  // Write a real .md file to a temp dir so the binding's
+  // os.ReadFile + path validation runs the same code as in production.
+  const tmpFile = path.join(os.tmpdir(), `ideate-md-${Date.now()}-${Math.floor(Math.random() * 1e6)}.md`)
+  await fs.promises.writeFile(tmpFile, fileContent)
+  const reviewId = await page.evaluate(async (p) => {
+    // @ts-expect-error wails binding
+    const r = (await window.go.app.App.RequestMarkdownReview(p, '')) as { ID: string }
+    return r.ID
+  }, tmpFile)
+  return reviewId
 }
 
 async function createIdea(page: import('@playwright/test').Page, name: string): Promise<string> {
@@ -48,10 +46,19 @@ async function createIdea(page: import('@playwright/test').Page, name: string): 
 }
 
 test.describe('Footer chip survives review→session navigation', () => {
-  const reviewId = 'playwright-md-footer-chip-transition'
-
+  // afterEach cancels any pending review via the real binding so the
+  // central reviews store reaches the same terminal state production
+  // hits after a user dismiss.
   test.afterEach(async ({ page }) => {
-    cleanReview(reviewId)
+    await page.evaluate(async () => {
+      // @ts-expect-error wails binding
+      const W = (window as any)
+      if (!W.go?.app?.App?.ListPendingReviews) return
+      const pending = (await W.go.app.App.ListPendingReviews()) ?? []
+      for (const r of pending) {
+        try { await W.go.app.App.CancelReview(r.id) } catch { /* already gone */ }
+      }
+    })
     await stopAllRunningSessions(page)
   })
 
@@ -85,8 +92,10 @@ test.describe('Footer chip survives review→session navigation', () => {
     expect(sessionMatch).not.toBeNull()
     const sessionUuid = sessionMatch?.[2] ?? ''
 
-    // Open the markdown review route.
-    seedMarkdownReview(reviewId, '# Review\n\nFooter-chip transition test.\n')
+    // Open the markdown review route. Creating the review via the
+    // real Wails binding fires `review:changed`, which the bar listens
+    // for — same path the live UI uses.
+    const reviewId = await requestMarkdownReview(page, '# Review\n\nFooter-chip transition test.\n')
     await page.goto(`/#/review?reviewId=${reviewId}`)
     await page.waitForSelector('[data-testid="markdown-review-editor"]', { timeout: 15000 })
 

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -23,6 +24,36 @@ func (a *App) GetLocalDiff(repoPath, base, head string) (*review.DiffResult, err
 
 func (a *App) GetReview(reviewID string) (*review.Review, error) {
 	return a.svc.ReadReview(reviewID)
+}
+
+// RequestMarkdownReview creates (or reopens) a markdown review for the
+// given on-disk path. Mirrors the MCP `request_markdown_review` tool
+// but exposed as a Wails binding so Playwright tests can drive the
+// real creation path — including the `review:changed` event the
+// PendingReviewsBar listens on — without resorting to disk-seeding
+// review records that bypass the event. Path must end in .md or .mdx.
+// IdeaSlug is empty for standalone reviews (the binding caller can
+// fill it in if known).
+
+func (a *App) RequestMarkdownReview(path, ideaSlug string) (*review.Review, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	content, err := os.ReadFile(absPath) //nolint:gosec // local-first app; path comes from a Wails caller
+	if err != nil {
+		return nil, err
+	}
+	r, _, err := a.svc.CreateOrReopenMarkdownReview(review.MarkdownCreateOpts{
+		Path:     absPath,
+		Original: string(content),
+		IdeaSlug: ideaSlug,
+	})
+	if err != nil {
+		return nil, err
+	}
+	a.emitReviewChanged(r)
+	return r, nil
 }
 
 // SubmitDiffReview marks a diff review as complete with comments and summary.

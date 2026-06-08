@@ -58,11 +58,22 @@ async function createDormantSession(page: import('@playwright/test').Page, slug:
     return (JSON.parse(raw) as { status?: string }).status || ''
   }, { timeout: 5000 }).not.toBe('running')
 
-  // Promote stopped → dormant on disk. The adopt sweep does this on
-  // startup for idle idea sessions; the test mimics it directly.
-  const record = JSON.parse(await fs.readFile(sessionPath, 'utf-8')) as Record<string, unknown>
-  record.status = 'dormant'
-  await fs.writeFile(sessionPath, JSON.stringify(record, null, 2))
+  // Promote stopped → dormant via the real markSessionDormant path so
+  // the `session:<uuid>:status` event fires (same as crash-recovery).
+  // An earlier version wrote `status='dormant'` directly to disk,
+  // bypassing the event — see docs/test-drift-audit.md.
+  await page.evaluate(
+    async ({ slug, uuid }) => {
+      // @ts-expect-error wails dev-only binding
+      await window.go.app.App.ForceDormantSession(slug, uuid)
+    },
+    { slug, uuid },
+  )
+  await expect.poll(async () => {
+    const raw = await fs.readFile(sessionPath, 'utf-8').catch(() => '')
+    if (!raw) return ''
+    return (JSON.parse(raw) as { status?: string }).status || ''
+  }, { timeout: 5000 }).toBe('dormant')
 
   return uuid
 }
