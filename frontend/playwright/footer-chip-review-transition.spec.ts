@@ -29,8 +29,8 @@ async function requestMarkdownReview(page: import('@playwright/test').Page, file
   await fs.promises.writeFile(tmpFile, fileContent)
   const reviewId = await page.evaluate(async (p) => {
     // @ts-expect-error wails binding
-    const r = (await window.go.app.App.RequestMarkdownReview(p, '')) as { ID: string }
-    return r.ID
+    const r = (await window.go.app.App.RequestMarkdownReview(p, '')) as { id: string }
+    return r.id
   }, tmpFile)
   return reviewId
 }
