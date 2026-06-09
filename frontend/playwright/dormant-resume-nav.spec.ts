@@ -123,15 +123,17 @@ test.describe('Dormant resume on navigation', () => {
     await page.waitForSelector('.terminal-container .xterm-screen', { timeout: 10000 })
   })
 
-  test('terminated session: home card opens idea-detail, NOT auto-resume', async ({ page }) => {
+  test('terminated session: home card opens session-detail, NOT auto-resume', async ({ page }) => {
     test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
 
     const name = `Terminated Card Click ${Date.now()}`
     const slug = await createIdea(page, name)
 
     // Run a session and stop it. Status lands at "stopped" (not
-    // "dormant" — the test never promotes it on disk). The resume
-    // helper should treat this as terminated and NOT auto-resume.
+    // "dormant" — the test never promotes it on disk). The resolver
+    // should treat this as a user-terminated session and route to its
+    // session-detail UI (resume / new-session buttons) WITHOUT
+    // auto-resuming. The user already said "stop."
     await page.click('.idea-sidebar .btn-small')
     await page.selectOption('.session-start select', 'testagent')
     await page.click('button:has-text("Start Session")')
@@ -156,8 +158,13 @@ test.describe('Dormant resume on navigation', () => {
     await expect(card).toBeVisible({ timeout: 10000 })
     await card.click()
 
-    // Should land on idea-detail, NOT a session URL.
-    await expect(page).toHaveURL(new RegExp(`#/idea/${slug}$`), { timeout: 5000 })
-    await expect(page.locator('.idea-detail-name')).toHaveText(name)
+    // Should land on session-detail for the terminated session.
+    // No terminal (it's not running); the Resume button is the
+    // resume-affordance, not a silent auto-resume.
+    await expect(page).toHaveURL(new RegExp(`#/idea/${slug}/session/${uuid}$`), { timeout: 5000 })
+    await expect(page.locator('button[aria-label="Resume session"]')).toBeVisible({ timeout: 5000 })
+    // Critically, no live terminal should be present — auto-resume would
+    // have started one. Use a fast assertion so we don't burn the test budget.
+    await expect(page.locator('.terminal-container .xterm-screen')).toHaveCount(0)
   })
 })

@@ -747,7 +747,12 @@ async function waitForBanner(page: import('@playwright/test').Page) {
   } catch (err) {
     // Diagnostic on timeout: dump every registered terminal's buffer so
     // future CI artifacts carry the data needed to diagnose this flake.
-    const dump = await page.evaluate(() => {
+    // Wrap the evaluate in try/catch — playwright tears the page down
+    // after the test budget expires, and a "browser closed" error here
+    // would shadow the real timeout error in the failure log.
+    let dump: string
+    try {
+      dump = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const reg = (window as any).__ideateTerminals as
         | Record<string, { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }>
@@ -763,7 +768,10 @@ async function waitForBanner(page: import('@playwright/test').Page) {
         }
         return `--- terminal ${id} (${buf.length} lines) ---\n${lines.join('\n')}`
       }).join('\n\n')
-    })
+      })
+    } catch (dumpErr) {
+      dump = `(diagnostic dump failed: ${String(dumpErr)})`
+    }
     console.error(`waitForBanner timed out — terminal buffer dump:\n${dump}`)
     throw err
   }

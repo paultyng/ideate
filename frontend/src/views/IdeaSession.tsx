@@ -178,13 +178,26 @@ export default function IdeaSession() {
 
   // Pass agent explicitly — React state updates are batched and may not be
   // visible within the same event handler that called setState.
-  const startSession = useCallback(async (resume: boolean, agent?: string) => {
+  // Resume uses the explicit-UUID binding so the backend doesn't re-pick a
+  // different session (the old StartIdeaSession(resume=true) would resume
+  // whichever non-running session was most recent, ignoring which one the
+  // user was looking at).
+  const startSession = useCallback(async (resume: boolean, agent?: string, resumeUUID?: string) => {
     if (!slug) return
     const useAgent = agent ?? agentType
     setStarting(true)
     setError('')
     try {
-      const result = await callBinding('StartIdeaSession', slug, useAgent, resume) as { uuid: string } | null
+      let result: { uuid: string } | null
+      if (resume) {
+        if (!resumeUUID) {
+          setError('resume requires a session uuid')
+          return
+        }
+        result = await callBinding('ResumeIdeaSession', slug, resumeUUID) as { uuid: string } | null
+      } else {
+        result = await callBinding('StartIdeaSession', slug, useAgent, false) as { uuid: string } | null
+      }
       if (result) {
         setAgentType(useAgent)
         setActiveSessionId(result.uuid)
@@ -275,13 +288,13 @@ export default function IdeaSession() {
               <Square size={14} strokeWidth={2} fill="currentColor" />
             </button>
           )}
-          {isEnded && canResume && (
+          {isEnded && canResume && activeSessionId && (
             <button
               type="button"
               title={starting ? 'Resuming…' : 'Resume session'}
               aria-label="Resume session"
               disabled={starting}
-              onClick={() => startSession(true, agentType)}
+              onClick={() => startSession(true, agentType, activeSessionId)}
             >
               <Play size={14} strokeWidth={1.75} />
             </button>
@@ -303,7 +316,7 @@ export default function IdeaSession() {
               title={starting ? 'Resuming…' : 'Resume session'}
               aria-label="Resume session"
               disabled={starting}
-              onClick={() => startSession(true, completedSession.agent)}
+              onClick={() => startSession(true, completedSession.agent, completedSession.uuid)}
             >
               <Play size={14} strokeWidth={1.75} />
             </button>

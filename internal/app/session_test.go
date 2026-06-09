@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -373,6 +374,99 @@ func TestMarkSessionDormant_EmitsStatusEvent(t *testing.T) {
 	if got.Status != model.SessionStatusDormant {
 		t.Errorf("Status = %q, want dormant", got.Status)
 	}
+}
+
+// StartIdeaSession(resume=true) must NOT pick a user-terminated session
+// (completed/stopped). Only Status=dormant is implicitly resumable. Guards
+// against regression where the candidate filter used `Status != Running`
+// and would resume a freshly `/exit`'d session in preference to an older
+// dormant.
+func TestStartIdeaSession_ResumeSkipsUserTerminated(t *testing.T) {
+	t.Parallel()
+	a, _ := newSessionTestApp(t)
+
+	idea := &model.Idea{Name: "Resume Skip", Status: model.StatusActive}
+	if err := a.store.Create(a.ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	now := time.Now()
+	// Older dormant — implicitly resumable.
+	dormantUUID := "uuid-dormant-older"
+	if err := a.store.WriteSession(a.ctx, idea.Slug, dormantUUID, model.AgentSession{
+		UUID: dormantUUID, Agent: "claude-code",
+		Status: model.SessionStatusDormant, Started: now.Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatalf("WriteSession dormant: %v", err)
+	}
+	// Newer completed via /exit — must be SKIPPED by implicit-resume.
+	exitedUUID := "uuid-exited-newer"
+	end := now.Add(-1 * time.Minute)
+	if err := a.store.WriteSession(a.ctx, idea.Slug, exitedUUID, model.AgentSession{
+		UUID: exitedUUID, Agent: "claude-code",
+		Status: model.SessionStatusCompleted, StopReason: model.SessionStopReasonExit,
+		Started: now.Add(-30 * time.Minute), Ended: &end,
+	}); err != nil {
+		t.Fatalf("WriteSession exited: %v", err)
+	}
+
+	// resume=true should target the older dormant (not the newer exited).
+	// Spawn will fail because no claude runner is registered, but the
+	// failure mode tells us which UUID got chosen via the error or coordinator
+	// state. Best probe: read back the session record — only the chosen
+	// UUID gets Status=Running written by the start path. Since spawn fails
+	// before that write... we can't read disk. Instead, exercise the picker
+	// directly by checking that the picker doesn't pick the exited one.
+	//
+	// Use a probe: call StartIdeaSession; if it would have picked the
+	// exited session, the start path would treat it as resume (config.ResumeUUID
+	// = exitedUUID). If it picks dormant, config.ResumeUUID = dormantUUID.
+	// We can't see config, but we CAN see the spawn-error message which
+	// will include the UUID via wrapped errors when an unregistered runner
+	// is selected. Simpler: register a stub runner that captures the config.
+	captured := captureRunnerConfig(t, a)
+
+	if _, err := a.StartIdeaSession(idea.Slug, "claude-code", true); err != nil {
+		// Spawn may succeed against the stub; if it errors that's fine too.
+		_ = err
+	}
+
+	if got := captured.lastResumeUUID(); got != dormantUUID {
+		t.Errorf("resume picked %q, want %q (the older dormant — newer exited must be skipped)", got, dormantUUID)
+	}
+}
+
+// captureRunner records the SessionConfig of every Run call so tests
+// can assert on the resume UUID without needing a real PTY.
+type captureRunner struct {
+	mu     sync.Mutex
+	last   agent.SessionConfig
+	called bool
+}
+
+func (r *captureRunner) Run(_ context.Context, cfg agent.SessionConfig, _ agent.OutputFunc) (*agent.Session, error) {
+	r.mu.Lock()
+	r.last = cfg
+	r.called = true
+	r.mu.Unlock()
+	// Return an error so the caller exits cleanly without us needing to
+	// fabricate a *agent.Session (its fields are unexported).
+	return nil, errors.New("capture-runner: not spawning")
+}
+
+func (r *captureRunner) CanResumeSession() bool { return true }
+
+func (r *captureRunner) lastResumeUUID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.last.ResumeUUID
+}
+
+func captureRunnerConfig(t *testing.T, a *App) *captureRunner {
+	t.Helper()
+	r := &captureRunner{}
+	a.coordinator.RegisterRunner("claude-code", r)
+	return r
 }
 
 // When the running record belongs to a *different* agent type, the start path

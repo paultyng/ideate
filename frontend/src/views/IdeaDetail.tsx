@@ -240,9 +240,14 @@ export default function IdeaDetail() {
     : dormantSession
       ? 'Resume dormant session'
       : 'Open most recent session'
+  // mostRecent surfaces the newest non-running session (any status) so
+  // sessionNav can prefer a freshly-terminated session over an older
+  // dormant — without it the resolver would auto-resume the dormant.
+  const mostRecentNonRunning = sortedSessions.find((s) => s.status !== 'running')
   const navResumableSessions = {
     running: runningSession ? [runningSession] : [],
     dormant: dormantSession ? [dormantSession] : [],
+    mostRecent: mostRecentNonRunning,
   }
   const sessionsCollapsed = sessionsCollapsedOverride ?? sortedSessions.length > 0
 
