@@ -348,10 +348,16 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 	var sessionUUID string
 
 	if resume {
-		// Find the most recent terminated session for this idea+agent.
+		// Implicit-resume path: only consider dormant sessions. A
+		// user-terminated session (status=completed/stopped, stop_reason in
+		// {exit, user, cleared, compacted, orphaned}) is *not* implicitly
+		// resumable — the user said "stop." Callers that want to revive a
+		// terminated session must go through ResumeIdeaSession with the
+		// explicit UUID. ListSessions is started-DESC so the first dormant
+		// match is the most recent.
 		sessions, _ := a.svc.ListSessions(a.ctx, slug)
 		for _, s := range sessions {
-			if s.Agent == agentType && s.Status != model.SessionStatusRunning {
+			if s.Agent == agentType && s.Status == model.SessionStatusDormant {
 				sessionUUID = s.UUID
 				event = "session_resumed"
 				break
@@ -437,6 +443,89 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 		Fields:    map[string]any{"agent": agentType},
 	}); err != nil {
 		slog.Warn("appending session-start history event",
+			slog.String("slug", slug), slog.String("uuid", sessionUUID),
+			slog.Any("err", err))
+	}
+
+	return &SessionStartResult{UUID: sessionUUID}, nil
+}
+
+// ResumeIdeaSession resumes a specific session by UUID. Unlike
+// StartIdeaSession(resume=true) — which picks the most-recent dormant
+// candidate itself — this binding respects the caller's intent: it
+// resumes the named session, whatever its stop reason. Used by the
+// session-detail Resume button and the quick-switcher auto-resume so
+// the frontend's "this UUID" choice survives the round-trip to the
+// backend.
+//
+// Errors when: idea archived, session not found for slug, session is
+// still running (no-op-resume guard), agent type doesn't support resume.
+func (a *App) ResumeIdeaSession(slug, sessionUUID string) (*SessionStartResult, error) {
+	if slug == "" {
+		return nil, fmt.Errorf("slug is required")
+	}
+	if sessionUUID == "" {
+		return nil, fmt.Errorf("session uuid is required")
+	}
+
+	idea, err := a.svc.Get(a.ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("loading idea: %w", err)
+	}
+	if err := a.svc.EnsureStartable(a.ctx, slug); err != nil {
+		return nil, err
+	}
+
+	sess, err := a.svc.ReadSession(a.ctx, slug, sessionUUID)
+	if err != nil {
+		return nil, fmt.Errorf("loading session: %w", err)
+	}
+	if sess.Status == model.SessionStatusRunning {
+		if a.coordinator.IsRunning(sessionUUID) {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
+		return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionStaleRunning}
+	}
+
+	if !a.AgentSupportsResume(sess.Agent) {
+		return nil, fmt.Errorf("agent %q does not support resume", sess.Agent)
+	}
+
+	workingDir := filepath.Join(a.ideasDir, slug)
+	config := agent.SessionConfig{
+		Name:       idea.Name,
+		WorkingDir: workingDir,
+		AgentType:  sess.Agent,
+		IdeaSlug:   slug,
+		ResumeUUID: sessionUUID,
+	}
+
+	if a.mcpManager != nil {
+		a.mcpManager.RegisterSession(sessionUUID)
+	}
+	if _, err := a.coordinator.Start(a.ctx, config); err != nil {
+		if a.mcpManager != nil {
+			a.mcpManager.UnregisterSession(sessionUUID)
+		}
+		return nil, fmt.Errorf("starting agent: %w", err)
+	}
+
+	sess.Status = model.SessionStatusRunning
+	sess.StopReason = ""
+	sess.Ended = nil
+	if err := a.svc.WriteSession(a.ctx, slug, sessionUUID, *sess); err != nil {
+		slog.Warn("writing resumed session record",
+			slog.String("slug", slug), slog.String("uuid", sessionUUID),
+			slog.Any("err", err))
+	}
+
+	if err := a.svc.AppendHistory(a.ctx, slug, model.HistoryEvent{
+		Timestamp: time.Now(),
+		Event:     "session_resumed",
+		Session:   sessionUUID,
+		Fields:    map[string]any{"agent": sess.Agent, "by": "explicit_uuid"},
+	}); err != nil {
+		slog.Warn("appending session-resumed history event",
 			slog.String("slug", slug), slog.String("uuid", sessionUUID),
 			slog.Any("err", err))
 	}

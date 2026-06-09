@@ -20,21 +20,31 @@
 
 import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { StartIdeaSession } from '../wailsjs/go/app/App'
+import { ResumeIdeaSession } from '../wailsjs/go/app/App'
 import type { model } from '../wailsjs/go/models'
 
-// Minimal sessions shape: just the two buckets the resolver cares about.
-// store.IdeaSessionSummary (used by dashboard / quick switcher) satisfies
-// this implicitly. IdeaDetail constructs one inline from its
-// AgentSession[] without the rest of the summary fields.
+// Minimal sessions shape: running + dormant for resume targets, plus the
+// most-recent terminated entry so the resolver can decide whether an
+// explicit termination should win over an older dormant. IdeaDetail
+// constructs one inline from its AgentSession[].
 export type ResumableSessions = {
   running?: model.AgentSession[]
   dormant?: model.AgentSession[]
+  // mostRecent is the newest non-running session (any status). Set by the
+  // store-side summary builder; surfaces user-terminated sessions
+  // (completed/stopped) that wouldn't appear in `dormant` so the resolver
+  // can prefer them over older dormants per the recency rule below.
+  mostRecent?: model.AgentSession
 }
 
 export type SessionTarget =
   | { kind: 'running'; session: model.AgentSession }
   | { kind: 'dormant'; session: model.AgentSession }
+  // 'terminated' means a user-ended session (completed/stopped) is the
+  // newest non-running entry. Navigate to its session-detail UI; do NOT
+  // auto-resume — the user already said "stop." From session-detail they
+  // can explicitly resume via the Resume button.
+  | { kind: 'terminated'; session: model.AgentSession }
   | { kind: 'none' }
 
 // Pick the newest entry from a non-empty AgentSession[] by `started`.
@@ -44,9 +54,17 @@ function newestByStarted(list: model.AgentSession[]): model.AgentSession {
 }
 
 // Pure: resolve a navigation target for a given idea's session summary.
-// Returns 'running' when a running session exists, 'dormant' when no running
-// but at least one dormant, 'none' otherwise. Multiple in either bucket: newest
-// by `started` wins, matching the existing CommandPalette + IdeaCard logic.
+//
+// Order of preference:
+//   1. running → open the live terminal
+//   2. user-terminated newer than every dormant → session-detail (NO auto-resume)
+//   3. dormant → auto-resume the newest dormant
+//   4. terminated alone (no dormant) → session-detail
+//   5. none → idea-detail
+//
+// The recency check on step 2 fixes the bug where an older orphaned
+// dormant would shadow a freshly /exit'd session and auto-resume the
+// wrong thing.
 export function resolveSessionTarget(
   sessions: ResumableSessions | undefined,
 ): SessionTarget {
@@ -55,8 +73,23 @@ export function resolveSessionTarget(
     return { kind: 'running', session: newestByStarted(runningList) }
   }
   const dormantList = sessions?.dormant ?? []
-  if (dormantList.length > 0) {
-    return { kind: 'dormant', session: newestByStarted(dormantList) }
+  const newestDormant = dormantList.length > 0 ? newestByStarted(dormantList) : undefined
+  const mostRecent = sessions?.mostRecent
+  // mostRecent is non-running; if it isn't dormant, it was user-terminated
+  // (completed/stopped) and outranks any dormant strictly older than it.
+  if (
+    mostRecent &&
+    mostRecent.status !== 'dormant' &&
+    mostRecent.status !== 'running' &&
+    (!newestDormant || (mostRecent.started || '') > (newestDormant.started || ''))
+  ) {
+    return { kind: 'terminated', session: mostRecent }
+  }
+  if (newestDormant) {
+    return { kind: 'dormant', session: newestDormant }
+  }
+  if (mostRecent) {
+    return { kind: 'terminated', session: mostRecent }
   }
   return { kind: 'none' }
 }
@@ -100,12 +133,23 @@ export function useNavigateToIdeaSession(): (
       }
       if (target.kind === 'dormant') {
         try {
-          await StartIdeaSession(slug, target.session.agent, true)
+          // Explicit-UUID resume: ResumeIdeaSession respects the caller's
+          // chosen UUID. StartIdeaSession(resume=true) would re-pick on the
+          // backend side and could resume a different session if a newer
+          // user-terminated one exists.
+          await ResumeIdeaSession(slug, target.session.uuid)
           navigate(`/idea/${slug}/session/${target.session.uuid}`)
           focusTerminal(target.session.uuid)
         } catch {
           navigate(`/idea/${slug}`)
         }
+        return
+      }
+      if (target.kind === 'terminated') {
+        // User-terminated session is the newest. Show its session-detail
+        // UI (resume / new-session buttons). Do NOT auto-resume — the
+        // user said "stop."
+        navigate(`/idea/${slug}/session/${target.session.uuid}`)
         return
       }
       navigate(`/idea/${slug}`)
