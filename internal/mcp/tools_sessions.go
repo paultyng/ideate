@@ -878,21 +878,34 @@ func (m *Manager) isOrchestratorUUID(ctx context.Context, uuid string) (bool, er
 // session if any. The orchestrator lives under the synthetic
 // model.OrchestratorSlug; an idea agent calling reply_to_orchestrator
 // uses this to discover the target without needing the UUID up front.
+//
+// When more than one record passes both filters (rare but reachable on
+// e.g. /clear successor races, or any window where the predecessor's
+// disk status hasn't flipped yet), the *newest by Started* wins. The
+// older one was almost certainly the predecessor; routing the reply
+// to its (dying) PTY would silently drop the message.
 func (m *Manager) findRunningOrchestrator(ctx context.Context) (string, error) {
 	sessions, err := m.store.ListSessions(ctx, model.OrchestratorSlug)
 	if err != nil {
 		return "", fmt.Errorf("listing orchestrator sessions: %w", err)
 	}
-	for _, s := range sessions {
+	var best *model.AgentSession
+	for i := range sessions {
+		s := &sessions[i]
 		if s.Status != model.SessionStatusRunning {
 			continue
 		}
 		if !m.resolver.IsRunning(s.UUID) {
 			continue
 		}
-		return s.UUID, nil
+		if best == nil || s.Started.After(best.Started) {
+			best = s
+		}
 	}
-	return "", nil
+	if best == nil {
+		return "", nil
+	}
+	return best.UUID, nil
 }
 
 func (m *Manager) handleReplyToOrchestrator(sessionID string) server.ToolHandlerFunc {

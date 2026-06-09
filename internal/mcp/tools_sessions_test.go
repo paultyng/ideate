@@ -848,6 +848,109 @@ func TestReplyToOrchestrator_NoOrchestrator(t *testing.T) {
 	}
 }
 
+// reply_to_orchestrator after the original orchestrator terminated and
+// a new one started must route to the NEW one. The on-disk record for
+// the old orchestrator may still carry Status=running (the App-side
+// finalizeSession is gated on idea_slug != "" and so doesn't run for
+// the root orchestrator; only the SessionEnd hook flips the predecessor,
+// and a missed hook leaves the stale record behind). The picker must
+// filter by coordinator liveness (resolver.IsRunning), not just disk
+// status.
+func TestReplyToOrchestrator_RoutesToLiveOrchestratorAfterRestart(t *testing.T) {
+	t.Parallel()
+	m, store, resolver := setupOrchestrator(t)
+	resolver.mapping["alpha-ses"] = "alpha"
+
+	now := time.Now().UTC()
+	// Disk: old orchestrator stale-running (process gone, hook missed),
+	// new orchestrator live-running. Started-DESC order = newest first.
+	store.sessions[model.OrchestratorSlug] = []model.AgentSession{
+		{
+			UUID: "orch-new", Agent: "claude-code",
+			Status: model.SessionStatusRunning, Started: now,
+		},
+		{
+			UUID: "orch-stale-running", Agent: "claude-code",
+			Status: model.SessionStatusRunning, Started: now.Add(-1 * time.Hour),
+		},
+	}
+	// Coordinator: only the new orchestrator is actually live.
+	resolver.running["orch-new"] = true
+	resolver.running["orch-stale-running"] = false
+	// Seed the writes map for the new orchestrator so we can assert
+	// later.
+	resolver.replays["orch-new"] = []byte("ready")
+
+	handler := m.handleReplyToOrchestrator("alpha-ses")
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"text": "from idea"}
+	res, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool error: %v", res.Content)
+	}
+
+	resolver.writesMu.Lock()
+	writesNew := resolver.writes["orch-new"]
+	writesStale := resolver.writes["orch-stale-running"]
+	resolver.writesMu.Unlock()
+	if len(writesNew) != 2 {
+		t.Errorf("expected 2 writes to orch-new (body + submit), got %d", len(writesNew))
+	}
+	if len(writesStale) != 0 {
+		t.Errorf("expected 0 writes to orch-stale-running, got %d — picker leaked to a dead PTY", len(writesStale))
+	}
+}
+
+// When MULTIPLE orchestrator records pass both the disk Status=running
+// check AND resolver.IsRunning, the picker must return the newest by
+// Started. Today the loop returns the first iteration match, which
+// makes the result store-iteration-order dependent. Real store sorts
+// started-DESC so the production-path test would pass with the fake
+// seeded in the same order — but seeding oldest-first here exposes
+// the ordering dependency.
+func TestReplyToOrchestrator_PrefersNewestWhenMultipleLive(t *testing.T) {
+	t.Parallel()
+	m, store, resolver := setupOrchestrator(t)
+	resolver.mapping["alpha-ses"] = "alpha"
+
+	now := time.Now().UTC()
+	// Seed OLDEST-FIRST to invert the production sort order. A correct
+	// picker should still return the newest.
+	store.sessions[model.OrchestratorSlug] = []model.AgentSession{
+		{
+			UUID: "orch-older", Agent: "claude-code",
+			Status: model.SessionStatusRunning, Started: now.Add(-2 * time.Hour),
+		},
+		{
+			UUID: "orch-newer", Agent: "claude-code",
+			Status: model.SessionStatusRunning, Started: now,
+		},
+	}
+	resolver.running["orch-older"] = true
+	resolver.running["orch-newer"] = true
+
+	handler := m.handleReplyToOrchestrator("alpha-ses")
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"text": "ambiguous live"}
+	if _, err := handler(context.Background(), req); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+
+	resolver.writesMu.Lock()
+	writesOlder := resolver.writes["orch-older"]
+	writesNewer := resolver.writes["orch-newer"]
+	resolver.writesMu.Unlock()
+	if len(writesNewer) != 2 {
+		t.Errorf("expected reply to land on orch-newer (newest by Started), got %d writes there", len(writesNewer))
+	}
+	if len(writesOlder) != 0 {
+		t.Errorf("expected 0 writes to orch-older, got %d — picker used iteration order, not Started", len(writesOlder))
+	}
+}
+
 // Calling reply_to_orchestrator from a session without an idea slug
 // (i.e. the orchestrator itself or a stray) must error — the prefix
 // can't be templated and routing back to the orchestrator from the
