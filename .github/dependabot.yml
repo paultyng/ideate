@@ -15,6 +15,17 @@ updates:
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
+      # react + react-dom share a release cadence and a peer-dependency
+      # contract; @types/* match the runtime packages. Grouping all four
+      # ensures major bumps land as one PR — otherwise dependabot opens
+      # split PRs (e.g. @types/react@19 without react-dom@19) that fail
+      # `npm install` with ERESOLVE.
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
 
   - package-ecosystem: github-actions
     directory: /
