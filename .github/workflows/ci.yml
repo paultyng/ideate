@@ -4,10 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Manual trigger from the Actions UI or `gh workflow run`. Useful for
-  # re-running CI on the same SHA without an empty commit — e.g. when
-  # hunting a flaky test across N attempts without `gh run rerun`
-  # admin rights.
   workflow_dispatch:
 
 permissions:
