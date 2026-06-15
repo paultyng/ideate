@@ -143,14 +143,24 @@ func startIdeaSessionTool() mcp.Tool {
 					"type":        "boolean",
 					"description": "If true, resume the most recent terminated session for this (slug, agent_type). Default false.",
 				},
+				"initial_prompt": map[string]any{
+					"type":        "string",
+					"description": "Optional. If non-empty, typed into the new session's prompt buffer once the agent is ready (boot + TUI raw-mode set up). Use for fire-and-forget orchestrator briefings.",
+				},
+				"initial_prompt_submit": map[string]any{
+					"type":        "boolean",
+					"description": "If true (default), submit the initial_prompt as the first turn. If false, leave it in the prompt buffer for the user to review and submit manually. Ignored when initial_prompt is empty.",
+				},
 			},
 			Required: []string{"slug"},
 		},
 	}
 }
 
-func (m *Manager) handleStartIdeaSession() server.ToolHandlerFunc {
-	return func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// sessionID is the caller's session UUID, recorded as source_session in
+// the session_initial_prompt history event. Empty for non-session callers.
+func (m *Manager) handleStartIdeaSession(sessionID string) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		m.mu.RLock()
 		starter := m.starter
 		m.mu.RUnlock()
@@ -163,14 +173,73 @@ func (m *Manager) handleStartIdeaSession() server.ToolHandlerFunc {
 		}
 		agentType := request.GetString("agent_type", "claude-code")
 		resume := request.GetBool("resume", false)
+		initialPrompt := request.GetString("initial_prompt", "")
+		initialPromptSubmit := request.GetBool("initial_prompt_submit", true)
 
 		uuid, err := starter.StartIdeaSession(slug, agentType, resume)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("start_idea_session: %v", err)), nil
 		}
-		body, err := json.Marshal(map[string]any{
+
+		// If the caller supplied an initial prompt, wait for the
+		// agent's TUI to come up before typing — fresh sessions race
+		// the same boot window dormant-resume hits in
+		// send_session_input. Writes before the agent claims stdin go
+		// to the kernel's line discipline and are silently dropped.
+		// Empty prompt skips the wait entirely (no write needed; saves
+		// up to defaultAgentReadyTimeout on fast-path callers).
+		initialPromptDelivered := false
+		if initialPrompt != "" {
+			if err := waitForAgentReady(ctx, m.resolver, uuid, resolvedAgentReadyTimeout()); err != nil {
+				// Session is up but the prompt didn't land. Return the
+				// uuid so the caller can decide to retry via
+				// send_session_input or surface to the user.
+				body, mErr := json.Marshal(map[string]any{
+					"uuid":                     uuid,
+					"initial_prompt_delivered": false,
+					"initial_prompt_submitted": false,
+					"initial_prompt_error":     err.Error(),
+				})
+				if mErr != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("marshaling: %v", mErr)), nil
+				}
+				return mcp.NewToolResultText(string(body)), nil
+			}
+			// Empty prefix: the initial prompt is the user's first
+			// turn, not an orchestrator-routed reply. The
+			// send_session_input wrapper "orchestrator: ..." is for
+			// cross-session attribution and is wrong here.
+			if err := m.writeBufferedInput(uuid, "", initialPrompt, initialPromptSubmit); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("writing initial_prompt: %v", err)), nil
+			}
+			initialPromptDelivered = true
+
+			// Best-effort: prompt already landed; don't fail the call on a history write.
+			if err := m.store.AppendHistory(ctx, slug, model.HistoryEvent{
+				Timestamp: time.Now().UTC(),
+				Event:     "session_initial_prompt",
+				Session:   uuid,
+				Fields: map[string]any{
+					"source_session": sessionID,
+					"text":           initialPrompt,
+					"submitted":      initialPromptSubmit,
+				},
+			}); err != nil {
+				slog.Warn("appending session_initial_prompt history event",
+					slog.String("slug", slug),
+					slog.String("uuid", uuid),
+					slog.Any("err", err))
+			}
+		}
+
+		response := map[string]any{
 			"uuid": uuid,
-		})
+		}
+		if initialPrompt != "" {
+			response["initial_prompt_delivered"] = initialPromptDelivered
+			response["initial_prompt_submitted"] = initialPromptDelivered && initialPromptSubmit
+		}
+		body, err := json.Marshal(response)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("encoding result: %v", err)), nil
 		}
@@ -809,6 +878,19 @@ func (m *Manager) handleSendSessionInput(sessionID string) server.ToolHandlerFun
 		}
 		if !m.resolver.IsRunning(targetUUID) {
 			return mcp.NewToolResultError(fmt.Sprintf("session %q not live after resume attempt", targetUUID)), nil
+		}
+
+		// Resumed dormant sessions need a moment for the agent process
+		// to boot, enter its TUI, and put stdin in raw mode before the
+		// PTY can receive input. Skipping this wait drops bytes through
+		// the kernel's line discipline before the agent claims it —
+		// same race shape as PR #25's MCP-connect issue, different
+		// stage. Live targets were presumed-ready by the caller, so
+		// skip the wait there to avoid pointless latency.
+		if resumed {
+			if err := waitForAgentReady(ctx, m.resolver, targetUUID, resolvedAgentReadyTimeout()); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("session resumed but agent not ready: %v (retry send_session_input or check get_session_output)", err)), nil
+			}
 		}
 
 		// Pick the prefix variant. include_reply_hint defaults to true

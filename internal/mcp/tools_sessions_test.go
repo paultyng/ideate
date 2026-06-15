@@ -471,8 +471,18 @@ func TestSendSessionInput_DormantWithoutStarter(t *testing.T) {
 }
 
 // resumingStarter wraps fakeSessionStarter so the resume call also
-// flips the resolver's IsRunning bit for the target uuid — mirrors
-// what the live coordinator does after StartIdeaSession returns.
+// flips the resolver's IsRunning bit AND seeds a vscreen replay
+// containing the agent-ready marker — mirrors what the live
+// coordinator does after StartIdeaSession returns plus what real
+// claude / testagent emit once their TUI is up.
+//
+// Seeding the marker is contract-binding, not test-cheating: the
+// helper's waitForAgentReady polls for that exact byte sequence
+// because real PTYs produce it, and the fake reflecting that fact
+// is what keeps the test predicate aligned with production. If the
+// real marker shape ever drifts, this fake stops mirroring reality
+// and the integration tests against real testagent (task 5) catch
+// the gap.
 type resumingStarter struct {
 	inner    *fakeSessionStarter
 	resolver *fakeResolver
@@ -483,6 +493,13 @@ func (r *resumingStarter) StartIdeaSession(slug, agentType string, resume bool) 
 	uuid, err := r.inner.StartIdeaSession(slug, agentType, resume)
 	if err == nil {
 		r.resolver.running[r.uuid] = true
+		// Seed a replay containing the claude prompt glyph so
+		// waitForAgentReady observes the post-resume agent-ready
+		// signal that a real claude TUI would produce.
+		if r.resolver.replays == nil {
+			r.resolver.replays = map[string][]byte{}
+		}
+		r.resolver.replays[r.uuid] = []byte("\x1b[1m❯ \x1b[0m")
 	}
 	return uuid, err
 }

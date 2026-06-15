@@ -38,7 +38,7 @@ func TestStartIdeaSession_DefaultAgentType(t *testing.T) {
 	starter := &fakeSessionStarter{uuid: "uuid-1"}
 	m.SetSessionStarter(starter)
 
-	res, err := m.handleStartIdeaSession()(context.Background(), mcp.CallToolRequest{
+	res, err := m.handleStartIdeaSession("orchestrator-ses")(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      "start_idea_session",
 			Arguments: map[string]any{"slug": "test-idea"},
@@ -72,7 +72,7 @@ func TestStartIdeaSession_PassesAgentTypeAndResume(t *testing.T) {
 	starter := &fakeSessionStarter{uuid: "uuid-2"}
 	m.SetSessionStarter(starter)
 
-	_, err := m.handleStartIdeaSession()(context.Background(), mcp.CallToolRequest{
+	_, err := m.handleStartIdeaSession("orchestrator-ses")(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name: "start_idea_session",
 			Arguments: map[string]any{
@@ -98,7 +98,7 @@ func TestStartIdeaSession_MissingSlug(t *testing.T) {
 	starter := &fakeSessionStarter{}
 	m.SetSessionStarter(starter)
 
-	res, err := m.handleStartIdeaSession()(context.Background(), mcp.CallToolRequest{
+	res, err := m.handleStartIdeaSession("orchestrator-ses")(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      "start_idea_session",
 			Arguments: map[string]any{},
@@ -122,7 +122,7 @@ func TestStartIdeaSession_StarterError(t *testing.T) {
 	starter := &fakeSessionStarter{err: errors.New("session already running")}
 	m.SetSessionStarter(starter)
 
-	res, err := m.handleStartIdeaSession()(context.Background(), mcp.CallToolRequest{
+	res, err := m.handleStartIdeaSession("orchestrator-ses")(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      "start_idea_session",
 			Arguments: map[string]any{"slug": "test-idea"},
@@ -145,7 +145,7 @@ func TestStartIdeaSession_NoStarterWired(t *testing.T) {
 	m := NewManager(newFakeStore(), &fakeResolver{}, nil)
 	// Intentionally skip SetSessionStarter.
 
-	res, err := m.handleStartIdeaSession()(context.Background(), mcp.CallToolRequest{
+	res, err := m.handleStartIdeaSession("orchestrator-ses")(context.Background(), mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      "start_idea_session",
 			Arguments: map[string]any{"slug": "test-idea"},

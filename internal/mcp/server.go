@@ -374,7 +374,7 @@ func (m *Manager) addRootTools(s *server.MCPServer, sessionID string) {
 	s.AddTool(gotoSessionTool(), m.handleGotoSession(sessionID))
 
 	s.AddTool(setSleepEnabledTool(), m.handleSetSleepEnabled())
-	s.AddTool(startIdeaSessionTool(), m.handleStartIdeaSession())
+	s.AddTool(startIdeaSessionTool(), m.handleStartIdeaSession(sessionID))
 
 	s.AddTool(listDefaultSkillsTool(), m.handleListDefaultSkills())
 	s.AddTool(resetDefaultSkillTool(), m.handleResetDefaultSkill())
