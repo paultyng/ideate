@@ -468,9 +468,11 @@ UPDATE status with update_backlog_items as work progresses (one patch per id; th
 - scope grew: extend affects so downstream agents know the full file footprint
 
 SURFACE the backlog to the user at natural break points:
-- start of a session: list_backlog to triage open items, ask which to tackle
+- start of a session: list_backlog with status=["open", "in_progress"] to triage active items, ask which to tackle
 - before exiting: confirm done items, surface anything still in_progress
-- when stuck or finished what was asked: list_backlog to seed the "what now?" conversation
+- when stuck or finished what was asked: list_backlog with status=["open", "in_progress"] to seed the "what now?" conversation
+
+list_backlog drops each item's body by default to keep responses small. Pass include_body=true when you actually need the body — picking up a long task, summarizing context, or reasoning about scope. Default-off is the right call for triage and status surveys.
 
 Backlog is distinct from GitHub Issues / Jira: items stay inside the
 idea, work even with no linked repo, and travel with the idea

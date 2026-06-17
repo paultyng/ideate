@@ -31,9 +31,29 @@ func listBacklogTool() mcp.Tool {
 		Description: desc("list_backlog"),
 		InputSchema: mcp.ToolInputSchema{
 			Type:       "object",
-			Properties: map[string]any{},
+			Properties: listBacklogFilterSchema(map[string]any{}),
 		},
 	}
+}
+
+// listBacklogFilterSchema adds the read-side projection + filter args
+// (status, include_body) to an existing properties map. Shared by
+// list_backlog and list_backlog_by_slug so both tools accept the same
+// filter contract.
+func listBacklogFilterSchema(props map[string]any) map[string]any {
+	props["status"] = map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type": "string",
+			"enum": []string{"open", "in_progress", "done", "wontfix"},
+		},
+		"description": "Optional status filter; returns only items whose status is in the given set. Pass `[\"open\"]` for the common triage case or `[\"open\", \"in_progress\"]` to surface active work. Omit to return all.",
+	}
+	props["include_body"] = map[string]any{
+		"type":        "boolean",
+		"description": "If true, include each item's `body` (Markdown context). Defaults to false because large backlogs blow tool-output caps otherwise. Set true when you need the body to pick up or summarize a task.",
+	}
+	return props
 }
 
 func addBacklogItemsTool() mcp.Tool {
@@ -96,9 +116,9 @@ func listBacklogBySlugTool() mcp.Tool {
 		Description: desc("list_backlog_by_slug"),
 		InputSchema: mcp.ToolInputSchema{
 			Type: "object",
-			Properties: map[string]any{
+			Properties: listBacklogFilterSchema(map[string]any{
 				"slug": map[string]any{"type": "string"},
-			},
+			}),
 			Required: []string{"slug"},
 		},
 	}
@@ -206,12 +226,12 @@ func backlogPatchInputSchema() map[string]any {
 // ----- Handlers ------------------------------------------------------------
 
 func (m *Manager) handleListBacklog(sessionID string) server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		_, slug, err := m.resolveIdea(ctx, sessionID)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return marshalBacklog(m.store.ListBacklog(ctx, slug))
+		return m.listBacklogResponse(ctx, slug, request)
 	}
 }
 
@@ -222,8 +242,96 @@ func (m *Manager) handleListBacklogBySlug(sessionID string) server.ToolHandlerFu
 		if slug == "" {
 			return mcp.NewToolResultError("slug is required"), nil
 		}
-		return marshalBacklog(m.store.ListBacklog(ctx, slug))
+		return m.listBacklogResponse(ctx, slug, request)
 	}
+}
+
+func (m *Manager) listBacklogResponse(ctx context.Context, slug string, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	statuses, includeBody, err := parseListBacklogArgs(request.GetArguments())
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	items, err := m.store.ListBacklog(ctx, slug)
+	if err != nil {
+		return marshalBacklog(nil, err)
+	}
+	return marshalBacklog(filterAndProjectBacklog(items, statuses, includeBody), nil)
+}
+
+// parseListBacklogArgs pulls the optional `status` (array of enum) and
+// `include_body` (bool) filters off the raw MCP arguments map.
+//
+// Unknown status values return an error (vs. silently dropping) so
+// callers learn the enum surface rather than getting empty results.
+func parseListBacklogArgs(args map[string]any) ([]model.BacklogStatus, bool, error) {
+	var statuses []model.BacklogStatus
+	if v, ok := args["status"]; ok && v != nil {
+		raw, ok := v.([]any)
+		if !ok {
+			return nil, false, errors.New("status must be an array of strings")
+		}
+		for i, e := range raw {
+			s, ok := e.(string)
+			if !ok {
+				return nil, false, fmt.Errorf("status[%d] must be a string", i)
+			}
+			parsed, err := validateBacklogStatus(s)
+			if err != nil {
+				return nil, false, fmt.Errorf("status[%d]: %w", i, err)
+			}
+			statuses = append(statuses, parsed)
+		}
+	}
+	var includeBody bool
+	if v, ok := args["include_body"]; ok && v != nil {
+		b, ok := v.(bool)
+		if !ok {
+			return nil, false, errors.New("include_body must be a boolean")
+		}
+		includeBody = b
+	}
+	return statuses, includeBody, nil
+}
+
+// validateBacklogStatus checks a status string against the BacklogStatus
+// enum. Used by every tool that accepts a status from MCP input — reads
+// (list_backlog filter) and writes (add_backlog_items, update_backlog_items)
+// share the same validation so corrupt values can't be stored on the
+// write side and then silently read-repaired to `open` on the read side.
+func validateBacklogStatus(s string) (model.BacklogStatus, error) {
+	switch model.BacklogStatus(s) {
+	case model.BacklogStatusOpen, model.BacklogStatusInProgress, model.BacklogStatusDone, model.BacklogStatusWontFix:
+		return model.BacklogStatus(s), nil
+	default:
+		return "", fmt.Errorf("%q is not one of open|in_progress|done|wontfix", s)
+	}
+}
+
+// filterAndProjectBacklog applies the optional status filter and, when
+// includeBody is false, strips `Body` from each returned item.
+//
+// Default-drop-body is the projection that keeps `list_backlog`
+// responses under the harness tool-output cap on real ideas (the
+// driver behind backlog item e1d17b25). Callers that need bodies
+// opt in via include_body=true.
+func filterAndProjectBacklog(items []model.BacklogItem, statuses []model.BacklogStatus, includeBody bool) []model.BacklogItem {
+	statusSet := make(map[model.BacklogStatus]struct{}, len(statuses))
+	for _, s := range statuses {
+		statusSet[s] = struct{}{}
+	}
+	out := make([]model.BacklogItem, 0, len(items))
+	for _, item := range items {
+		if len(statusSet) > 0 {
+			if _, ok := statusSet[item.Status]; !ok {
+				continue
+			}
+		}
+		if !includeBody {
+			item.Body = ""
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func (m *Manager) handleAddBacklogItems(sessionID string) server.ToolHandlerFunc {
@@ -337,7 +445,11 @@ func (m *Manager) addBacklogItemsBulk(
 			item.Body = v
 		}
 		if v, ok := fields["status"].(string); ok && v != "" {
-			item.Status = model.BacklogStatus(v)
+			parsed, err := validateBacklogStatus(v)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("items[%d].status: %v", i, err)), nil
+			}
+			item.Status = parsed
 		}
 		if v, ok := fields["external_url"].(string); ok {
 			item.ExternalURL = v
@@ -412,7 +524,12 @@ func (m *Manager) updateBacklogItemsBulk(
 			patch.Body = v
 		}
 		if v, ok := fields["status"].(string); ok && v != "" {
-			patch.Status = model.BacklogStatus(v)
+			parsed, err := validateBacklogStatus(v)
+			if err != nil {
+				results = append(results, result{ID: id, Status: "error", Error: fmt.Sprintf("status: %v", err)})
+				continue
+			}
+			patch.Status = parsed
 		}
 		if v, ok := fields["external_url"].(string); ok && v != "" {
 			patch.ExternalURL = v
