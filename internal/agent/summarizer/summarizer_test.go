@@ -334,6 +334,54 @@ func TestSummarizer_QueueFullReturnsFalse(t *testing.T) {
 	}
 }
 
+// TestEnqueue_SkipsOrchestratorSlug — the synthetic OrchestratorSlug
+// has no idea.md and nothing summarizable. Enqueue must filter it
+// before it reaches the worker; otherwise the regenerate path emits
+// a `loading idea: ... no such file` warn every cycle.
+func TestEnqueue_SkipsOrchestratorSlug(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	gen := &fakeGenerator{line: "line"}
+	s := New(gen, store)
+
+	if s.Enqueue(model.OrchestratorSlug) {
+		t.Errorf("Enqueue(OrchestratorSlug) returned true; should be filtered")
+	}
+	if s.Enqueue("") {
+		t.Errorf("Enqueue(\"\") returned true; should be filtered")
+	}
+
+	// And no generator call should have been triggered (since the
+	// orchestrator wasn't queued, the worker never picks it up).
+	// We don't Start workers here — but just in case, give a brief
+	// breath to ensure no goroutine sneaks through.
+	time.Sleep(10 * time.Millisecond)
+	if gen.callCount() != 0 {
+		t.Errorf("generator called %d times for orchestrator slug; want 0", gen.callCount())
+	}
+}
+
+// TestRegenerate_OrchestratorSlugIsSilentNoOp — defense-in-depth
+// guard inside regenerate itself: if any future caller bypasses
+// Enqueue (e.g. a direct test or a refactored call path), regenerate
+// returns nil silently rather than hitting store.Get and surfacing a
+// missing-file error.
+func TestRegenerate_OrchestratorSlugIsSilentNoOp(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	// Intentionally do NOT populate store.ideas[OrchestratorSlug] —
+	// the guard must short-circuit before store.Get is called.
+	gen := &fakeGenerator{}
+	s := New(gen, store)
+
+	if err := s.regenerate(context.Background(), model.OrchestratorSlug); err != nil {
+		t.Errorf("regenerate(OrchestratorSlug) returned %v; want nil", err)
+	}
+	if gen.callCount() != 0 {
+		t.Errorf("generator called %d times; want 0", gen.callCount())
+	}
+}
+
 func TestSanitizeSummary(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

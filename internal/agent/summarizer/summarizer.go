@@ -179,8 +179,14 @@ func (s *Summarizer) Stop() {
 // if slug is already queued (or running), this is a no-op. Returns
 // false if the queue is full (in which case the caller should log;
 // the staleness sweep will pick it up later).
+//
+// The synthetic OrchestratorSlug is filtered here so hook handlers
+// and sweeps can pass session.IdeaSlug verbatim without each caller
+// having to special-case the orchestrator. The orchestrator has no
+// idea.md and nothing summarizable; enqueueing it would just produce
+// a "loading idea: ... no such file" warn line every cycle.
 func (s *Summarizer) Enqueue(slug string) bool {
-	if slug == "" {
+	if slug == "" || slug == model.OrchestratorSlug {
 		return false
 	}
 	s.pendingMu.Lock()
@@ -231,7 +237,14 @@ func (s *Summarizer) runJob(slug string) {
 
 // regenerate is the per-slug pipeline: idea + latest session →
 // transcript tail → prompt → headless run → sidecar write.
+//
+// Defense-in-depth skip for the orchestrator: Enqueue filters this
+// slug at the front door, but any future direct-call path lands here
+// and would otherwise emit a noisy "loading idea: no such file" warn.
 func (s *Summarizer) regenerate(ctx context.Context, slug string) error {
+	if slug == model.OrchestratorSlug {
+		return nil
+	}
 	idea, err := s.store.Get(ctx, slug)
 	if err != nil {
 		return fmt.Errorf("loading idea: %w", err)
