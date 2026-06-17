@@ -56,6 +56,8 @@ func (s *FSStore) ListBacklog(_ context.Context, slug string) ([]model.BacklogIt
 // title/body/source and don't need to mint a UUID. Returns the
 // stored item so the caller can surface the assigned ID.
 func (s *FSStore) AddBacklogItem(ctx context.Context, slug string, item model.BacklogItem) (model.BacklogItem, error) {
+	unlock := s.locks.Lock(slug)
+	defer unlock()
 	items, err := s.ListBacklog(ctx, slug)
 	if err != nil {
 		return model.BacklogItem{}, err
@@ -88,6 +90,8 @@ func (s *FSStore) UpdateBacklogItem(ctx context.Context, slug, id string, patch 
 	if id == "" {
 		return fmt.Errorf("backlog item id is required")
 	}
+	unlock := s.locks.Lock(slug)
+	defer unlock()
 	items, err := s.ListBacklog(ctx, slug)
 	if err != nil {
 		return err
@@ -149,6 +153,8 @@ func (s *FSStore) DeleteBacklogItem(ctx context.Context, slug, id string) (bool,
 	if id == "" {
 		return false, fmt.Errorf("backlog item id is required")
 	}
+	unlock := s.locks.Lock(slug)
+	defer unlock()
 	items, err := s.ListBacklog(ctx, slug)
 	if err != nil {
 		return false, err
