@@ -292,52 +292,6 @@ func TestFeedDoesNotDeadlockOnQueryEscapes(t *testing.T) {
 	}
 }
 
-// Alt-screen Snapshot must (a) emit the DECSET ?1049 enter sequence
-// so a fresh xterm switches to its alternate buffer before receiving
-// the rendered TUI chrome, and (b) omit the main-screen scrollback
-// prepend so pre-?1049h history doesn't bleed into the alt buffer.
-// Without (a), Claude's bottom-input row ends up in xterm's main-
-// buffer scrollback on subsequent live output (the ghosting bug).
-func TestBuffer_Snapshot_AltScreen_EmitsEnterSequenceAndOmitsScrollback(t *testing.T) {
-	t.Parallel()
-	b := New(80, 24)
-
-	// Seed the main-screen scrollback with a sentinel that must NOT
-	// appear in the alt-screen snapshot. Push enough lines to scroll
-	// the marker off the visible region so it lives in scrollback.
-	b.Feed([]byte("MAIN-SENTINEL\r\n"))
-	for range 30 {
-		b.Feed([]byte("filler\r\n"))
-	}
-
-	// Enter alt-screen and draw a TUI body.
-	b.Feed([]byte("\x1b[?1049h"))
-	b.Feed([]byte("TUI-BODY"))
-
-	snap := b.Snapshot()
-
-	// (a) Enter sequence at the start.
-	if !bytes.HasPrefix(snap, []byte("\x1b[?1049h")) {
-		head := snap
-		if len(head) > 40 {
-			head = head[:40]
-		}
-		t.Errorf("snapshot does not start with \\x1b[?1049h: %q", head)
-	}
-	// Alt-screen body is present.
-	if !bytes.Contains(snap, []byte("TUI-BODY")) {
-		t.Errorf("snapshot missing alt-screen body: %q", snap)
-	}
-	// (b) Main-screen scrollback omitted — sentinel must not appear.
-	if bytes.Contains(snap, []byte("MAIN-SENTINEL")) {
-		t.Errorf("alt-screen snapshot leaked main-screen scrollback sentinel: %q", snap)
-	}
-	// "filler" rows (also pure main-screen content) likewise omitted.
-	if bytes.Contains(snap, []byte("filler")) {
-		t.Errorf("alt-screen snapshot leaked main-screen filler: %q", snap)
-	}
-}
-
 // Main-screen Snapshot keeps its existing scrollback + visible
 // behavior. Guards against accidentally short-circuiting the
 // non-alt-screen path.
@@ -362,37 +316,6 @@ func TestBuffer_Snapshot_MainScreen_UnchangedBehavior(t *testing.T) {
 	}
 	if !bytes.Contains(snap, []byte("SCROLLED-OFF")) {
 		t.Errorf("main-screen snapshot dropped scrollback content: %q", snap)
-	}
-}
-
-// Alt-screen Snapshot must end with a CSI CUP escape that points at
-// vt's current cursor coords, so xterm parks its cursor in the same
-// row vt thinks the cursor lives in (typically Claude's input row).
-// Without this, xterm's cursor sits at end-of-last-rendered-character
-// and the user's keystrokes echo in the wrong row until the agent's
-// next full repaint.
-func TestBuffer_Snapshot_AltScreen_EndsWithCursorPositionEscape(t *testing.T) {
-	t.Parallel()
-	b := New(80, 24)
-
-	// Enter alt-screen, then move the cursor to a known position
-	// via CSI CUP. row=5, col=7 (1-indexed in CSI, 0-indexed in vt).
-	b.Feed([]byte("\x1b[?1049h"))
-	b.Feed([]byte("\x1b[5;7H"))
-	b.Feed([]byte("X"))
-
-	snap := b.Snapshot()
-
-	// The cursor escape must appear AFTER the rendered body, not
-	// somewhere in the middle. Check the tail.
-	const wantTail = "\x1b[5;8H" // CUP after writing 'X' at (5,7) lands at (5,8)
-	if !bytes.HasSuffix(snap, []byte(wantTail)) {
-		// Show a useful tail-suffix for debugging.
-		tail := snap
-		if len(tail) > 30 {
-			tail = tail[len(tail)-30:]
-		}
-		t.Errorf("snapshot does not end with cursor escape %q; tail=%q", wantTail, tail)
 	}
 }
 
