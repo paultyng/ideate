@@ -243,38 +243,16 @@ func (b *Buffer) Snapshot() []byte {
 
 // renderNoLock produces the ANSI snapshot bytes from the emulator's
 // current state. Must be called with b.mu already held.
+//
+// The alt-screen replay path (DECSET ?1049 enter + cursor restore)
+// was removed in 2026-06: no agent we run uses alt-screen any more
+// (testagent v0.4+ uses bubbletea inline mode; Claude Code v2.1+
+// emits zero ?1049h/?1049l, verified by direct PTY probe). The
+// emu.IsAltScreen() accessor is kept available in case a future
+// agent reintroduces alt-screen mode; the snapshot path was the
+// only caller.
 func (b *Buffer) renderNoLock() []byte {
 	var buf bytes.Buffer
-	if b.emu.IsAltScreen() {
-		// Alt-screen replay must include the DECSET ?1049 enter
-		// sequence so xterm switches to its alternate buffer before
-		// receiving the rendered TUI chrome. Without this, xterm
-		// writes the bottom rows (e.g. Claude's input box) into its
-		// main buffer; subsequent live PTY output scrolls them into
-		// main-buffer scrollback as ghost lines that persist until a
-		// manual redraw.
-		//
-		// Skip the main-screen scrollback prepend: it would land in
-		// the alternate buffer too (xterm can't separate the
-		// pre-?1049h bytes from the post-?1049h render in a single
-		// flat write), bloating the alt-buffer with unrelated history.
-		// Main-screen scrollback is preserved in the emulator and
-		// will be visible again when Claude's TUI tears down via the
-		// matching ?1049l exit.
-		buf.WriteString("\x1b[?1049h")
-		buf.Write(bytes.ReplaceAll([]byte(b.emu.Render()), []byte("\n"), []byte("\r\n")))
-		// Restore the cursor to where vt has it (likely Claude's
-		// input row). Without this, xterm's cursor sits at the end
-		// of the last rendered character, typically one row below
-		// the input box — user keystrokes echo in the wrong row
-		// until Claude's next full repaint catches up.
-		//
-		// CSI CUP `\x1b[r;cH` is 1-indexed; uv.Position (image.Point)
-		// is 0-indexed.
-		pos := b.emu.CursorPosition()
-		fmt.Fprintf(&buf, "\x1b[%d;%dH", pos.Y+1, pos.X+1)
-		return buf.Bytes()
-	}
 	if sb := b.emu.Scrollback(); sb != nil {
 		for _, line := range sb.Lines() {
 			buf.WriteString(line.Render())
