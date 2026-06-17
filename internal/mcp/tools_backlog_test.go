@@ -79,6 +79,40 @@ func TestFilterAndProjectBacklog(t *testing.T) {
 	}
 }
 
+func TestValidateBacklogStatus(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []model.BacklogStatus{
+		model.BacklogStatusOpen,
+		model.BacklogStatusInProgress,
+		model.BacklogStatusDone,
+		model.BacklogStatusWontFix,
+	} {
+		s := s
+		t.Run("valid_"+string(s), func(t *testing.T) {
+			t.Parallel()
+			got, err := validateBacklogStatus(string(s))
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if got != s {
+				t.Errorf("got %q, want %q", got, s)
+			}
+		})
+	}
+
+	for _, bad := range []string{"", "pending", "OPEN", "open ", "in-progress"} {
+		bad := bad
+		t.Run("invalid_"+bad, func(t *testing.T) {
+			t.Parallel()
+			_, err := validateBacklogStatus(bad)
+			if err == nil {
+				t.Fatalf("expected error for %q, got nil", bad)
+			}
+		})
+	}
+}
+
 func TestFilterAndProjectBacklog_DoesNotMutateInput(t *testing.T) {
 	t.Parallel()
 	items := []model.BacklogItem{
@@ -137,7 +171,7 @@ func TestParseListBacklogArgs(t *testing.T) {
 		{
 			name:    "status element not in enum",
 			args:    map[string]any{"status": []any{"banana"}},
-			wantErr: "status[0] = \"banana\" is not one of open|in_progress|done|wontfix",
+			wantErr: "status[0]: \"banana\" is not one of open|in_progress|done|wontfix",
 		},
 		{
 			name:    "include_body not a boolean",

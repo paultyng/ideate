@@ -275,12 +275,11 @@ func parseListBacklogArgs(args map[string]any) ([]model.BacklogStatus, bool, err
 			if !ok {
 				return nil, false, fmt.Errorf("status[%d] must be a string", i)
 			}
-			switch model.BacklogStatus(s) {
-			case model.BacklogStatusOpen, model.BacklogStatusInProgress, model.BacklogStatusDone, model.BacklogStatusWontFix:
-				statuses = append(statuses, model.BacklogStatus(s))
-			default:
-				return nil, false, fmt.Errorf("status[%d] = %q is not one of open|in_progress|done|wontfix", i, s)
+			parsed, err := validateBacklogStatus(s)
+			if err != nil {
+				return nil, false, fmt.Errorf("status[%d]: %w", i, err)
 			}
+			statuses = append(statuses, parsed)
 		}
 	}
 	var includeBody bool
@@ -292,6 +291,20 @@ func parseListBacklogArgs(args map[string]any) ([]model.BacklogStatus, bool, err
 		includeBody = b
 	}
 	return statuses, includeBody, nil
+}
+
+// validateBacklogStatus checks a status string against the BacklogStatus
+// enum. Used by every tool that accepts a status from MCP input — reads
+// (list_backlog filter) and writes (add_backlog_items, update_backlog_items)
+// share the same validation so corrupt values can't be stored on the
+// write side and then silently read-repaired to `open` on the read side.
+func validateBacklogStatus(s string) (model.BacklogStatus, error) {
+	switch model.BacklogStatus(s) {
+	case model.BacklogStatusOpen, model.BacklogStatusInProgress, model.BacklogStatusDone, model.BacklogStatusWontFix:
+		return model.BacklogStatus(s), nil
+	default:
+		return "", fmt.Errorf("%q is not one of open|in_progress|done|wontfix", s)
+	}
 }
 
 // filterAndProjectBacklog applies the optional status filter and, when
@@ -432,7 +445,11 @@ func (m *Manager) addBacklogItemsBulk(
 			item.Body = v
 		}
 		if v, ok := fields["status"].(string); ok && v != "" {
-			item.Status = model.BacklogStatus(v)
+			parsed, err := validateBacklogStatus(v)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("items[%d].status: %v", i, err)), nil
+			}
+			item.Status = parsed
 		}
 		if v, ok := fields["external_url"].(string); ok {
 			item.ExternalURL = v
@@ -507,7 +524,12 @@ func (m *Manager) updateBacklogItemsBulk(
 			patch.Body = v
 		}
 		if v, ok := fields["status"].(string); ok && v != "" {
-			patch.Status = model.BacklogStatus(v)
+			parsed, err := validateBacklogStatus(v)
+			if err != nil {
+				results = append(results, result{ID: id, Status: "error", Error: fmt.Sprintf("status: %v", err)})
+				continue
+			}
+			patch.Status = parsed
 		}
 		if v, ok := fields["external_url"].(string); ok && v != "" {
 			patch.ExternalURL = v

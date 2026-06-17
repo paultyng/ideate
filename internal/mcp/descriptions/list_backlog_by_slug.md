@@ -5,5 +5,5 @@ Use to inspect a sibling idea's open work — e.g. "what's outstanding on the mi
 ## Args
 
 - `slug` (string, required) — target idea slug.
-- `status` (string[], optional) — filter to items whose status is in the given set. Values: `open` | `in_progress` | `done` | `wontfix`. Pass `["open"]` for the common triage case; `["open", "in_progress"]` to surface active work. Omit to return all.
+- `status` (string[], optional) — filter to items whose status is in the given set. Values: `open` | `in_progress` | `done` | `wontfix`. Pass `["open"]` for the common triage case; `["open", "in_progress"]` to surface active work. Omit to return all. Unknown values error rather than silently empty.
 - `include_body` (boolean, optional, default `false`) — include each item's `body` (Markdown context). Default-off because large backlogs blow tool-output caps otherwise.

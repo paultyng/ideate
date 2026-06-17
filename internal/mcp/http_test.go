@@ -502,6 +502,87 @@ func TestHTTPBacklogCRUD(t *testing.T) {
 	}
 }
 
+// TestHTTPBacklogStatusValidation — bad-status values are rejected on
+// every tool that accepts a status, so corrupt enum values can't be
+// stored on write and silently read-repaired to `open` later. Read-side
+// (`list_backlog` filter) and write-side (`add_backlog_items`,
+// `update_backlog_items`) share the same `validateBacklogStatus`.
+func TestHTTPBacklogStatusValidation(t *testing.T) {
+	t.Parallel()
+	ts, store := setupHTTPTest(t)
+
+	url := ts.URL + "/mcp"
+	sid := mcpSession(t, url, "ses-http")
+
+	// add_backlog_items with bad status aborts the whole batch with a
+	// tool-level error. Per-item validation; no items persisted.
+	{
+		rpcResp := callTool(t, url, "ses-http", sid, "add_backlog_items", map[string]any{
+			"items": []any{
+				map[string]any{"title": "valid", "status": "open"},
+				map[string]any{"title": "bad", "status": "pending"},
+			},
+		})
+		text := extractText(t, rpcResp)
+		if !strings.Contains(text, "items[1].status") || !strings.Contains(text, "pending") {
+			t.Errorf("expected items[1].status error mentioning %q, got %q", "pending", text)
+		}
+		if got := len(store.backlog["test-idea"]); got != 0 {
+			t.Errorf("backlog must stay empty on whole-batch abort, got %d items", got)
+		}
+	}
+
+	// Seed a valid item to exercise the update path.
+	var existingID string
+	{
+		rpcResp := callTool(t, url, "ses-http", sid, "add_backlog_items", map[string]any{
+			"items": []any{map[string]any{"title": "seed"}},
+		})
+		var items []model.BacklogItem
+		if err := json.Unmarshal([]byte(extractText(t, rpcResp)), &items); err != nil {
+			t.Fatalf("seed parse: %v", err)
+		}
+		existingID = items[0].ID
+	}
+
+	// update_backlog_items with bad status reports per-item error and
+	// does not mutate the stored item. Batch semantics (other patches in
+	// the same call still apply) match the existing "no fields supplied"
+	// per-item-error pattern.
+	{
+		rpcResp := callTool(t, url, "ses-http", sid, "update_backlog_items", map[string]any{
+			"patches": []any{
+				map[string]any{"id": existingID, "status": "banana"},
+			},
+		})
+		text := extractText(t, rpcResp)
+		var results []map[string]any
+		if err := json.Unmarshal([]byte(text), &results); err != nil {
+			t.Fatalf("update parse: %v", err)
+		}
+		if len(results) != 1 || results[0]["status"] != "error" {
+			t.Fatalf("expected per-item error, got %+v", results)
+		}
+		if errMsg, _ := results[0]["error"].(string); !strings.Contains(errMsg, "status") {
+			t.Errorf("expected status-related error, got %q", errMsg)
+		}
+		if got := store.backlog["test-idea"][0].Status; got != model.BacklogStatusOpen {
+			t.Errorf("status mutated to %q on rejected update; should remain open", got)
+		}
+	}
+
+	// list_backlog with bad status filter returns a tool-level error.
+	{
+		rpcResp := callTool(t, url, "ses-http", sid, "list_backlog", map[string]any{
+			"status": []any{"ghost"},
+		})
+		text := extractText(t, rpcResp)
+		if !strings.Contains(text, "status") || !strings.Contains(text, "ghost") {
+			t.Errorf("expected status-related error mentioning %q, got %q", "ghost", text)
+		}
+	}
+}
+
 // TestHTTPBacklogBySlugCrossIdea — an agent inside idea-A can add a
 // backlog item on idea-B without going through the orchestrator,
 // matching the user's "spin off / read / write another idea"
