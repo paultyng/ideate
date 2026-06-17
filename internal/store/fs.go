@@ -43,6 +43,10 @@ type FSStore struct {
 	branchPrefix   string
 	trackingBranch string
 	summaryBackend string
+
+	// locks serializes in-process writers against the same idea's
+	// on-disk artifacts (idea.md, backlog.json). See lock.go.
+	locks *slugLockManager
 }
 
 // NewFSStore creates a new filesystem-backed store. ideasDir holds idea
@@ -58,6 +62,7 @@ func NewFSStore(ideasDir, reviewsDir, branchPrefix, trackingBranch string) *FSSt
 		reviewsDir:     reviewsDir,
 		branchPrefix:   branchPrefix,
 		trackingBranch: trackingBranch,
+		locks:          newSlugLockManager(),
 	}
 }
 
@@ -309,7 +314,17 @@ func (s *FSStore) dirExists(name string) bool {
 }
 
 // Update modifies an existing idea's frontmatter.
-func (s *FSStore) Update(_ context.Context, idea *model.Idea) error {
+func (s *FSStore) Update(ctx context.Context, idea *model.Idea) error {
+	unlock := s.locks.Lock(idea.Slug)
+	defer unlock()
+	return s.updateUnlocked(ctx, idea)
+}
+
+// updateUnlocked is the body of Update without the per-slug lock —
+// callers that already hold s.locks.Lock(idea.Slug) (e.g. AddResource,
+// DeleteResource) use this to avoid self-deadlock on the non-reentrant
+// mutex. Public callers go through Update.
+func (s *FSStore) updateUnlocked(_ context.Context, idea *model.Idea) error {
 	dir := s.ideaDir(idea.Slug)
 	ideaPath := filepath.Join(dir, ideaFilename)
 
@@ -345,17 +360,21 @@ func (s *FSStore) Update(_ context.Context, idea *model.Idea) error {
 // AddResource upserts res into the idea identified by slug. It delegates
 // the dedupe-by-canonical-URL and type-promotion logic to model.UpsertResource.
 func (s *FSStore) AddResource(ctx context.Context, slug string, res model.Resource) error {
+	unlock := s.locks.Lock(slug)
+	defer unlock()
 	idea, err := s.Get(ctx, slug)
 	if err != nil {
 		return fmt.Errorf("getting idea: %w", err)
 	}
 	model.UpsertResource(idea, res)
-	return s.Update(ctx, idea)
+	return s.updateUnlocked(ctx, idea)
 }
 
 // DeleteResource removes the first resource whose canonical URL matches url.
 // Returns (true, nil) when removed; (false, nil) when no match (idempotent).
 func (s *FSStore) DeleteResource(ctx context.Context, slug, url string) (bool, error) {
+	unlock := s.locks.Lock(slug)
+	defer unlock()
 	idea, err := s.Get(ctx, slug)
 	if err != nil {
 		return false, fmt.Errorf("getting idea: %w", err)
@@ -366,7 +385,7 @@ func (s *FSStore) DeleteResource(ctx context.Context, slug, url string) (bool, e
 			continue
 		}
 		idea.Resources = append(idea.Resources[:i], idea.Resources[i+1:]...)
-		if err := s.Update(ctx, idea); err != nil {
+		if err := s.updateUnlocked(ctx, idea); err != nil {
 			return false, fmt.Errorf("updating idea: %w", err)
 		}
 		return true, nil
@@ -379,6 +398,8 @@ func (s *FSStore) DeleteResource(ctx context.Context, slug, url string) (bool, e
 // dashboard MRU sort reflects session activity without polluting history.
 // Returns the new Updated value.
 func (s *FSStore) TouchIdea(_ context.Context, slug string) (time.Time, error) {
+	unlock := s.locks.Lock(slug)
+	defer unlock()
 	ideaPath := filepath.Join(s.ideaDir(slug), ideaFilename)
 	data, err := os.ReadFile(ideaPath)
 	if err != nil {
