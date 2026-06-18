@@ -25,15 +25,15 @@ func TestResolveActiveSession_Running(t *testing.T) {
 		t.Fatalf("WriteSession: %v", err)
 	}
 
-	gotUUID, resumed, ok := a.ResolveActiveSession(idea.Slug)
-	if !ok {
-		t.Fatal("ok = false, want true")
+	got := a.ResolveActiveSession(idea.Slug)
+	if !got.OK {
+		t.Fatal("OK = false, want true")
 	}
-	if resumed {
-		t.Error("resumed = true, want false")
+	if got.Resumed {
+		t.Error("Resumed = true, want false")
 	}
-	if gotUUID != "uuid-running" {
-		t.Errorf("UUID = %q, want uuid-running", gotUUID)
+	if got.UUID != "uuid-running" {
+		t.Errorf("UUID = %q, want uuid-running", got.UUID)
 	}
 }
 
@@ -56,21 +56,20 @@ func TestResolveActiveSession_DormantResumes(t *testing.T) {
 		t.Fatalf("WriteSession: %v", err)
 	}
 
-	gotUUID, resumed, ok := a.ResolveActiveSession(idea.Slug)
-	if !ok {
+	got := a.ResolveActiveSession(idea.Slug)
+	if !got.OK {
 		// StartIdeaSession with a /dev/null binary will fail to spawn — that's
 		// acceptable in a unit test. In that case the method correctly falls back
-		// to ("", false, false). We assert the dormant UUID was found and that the
-		// resume attempt was made; full happy-path covered by integration tests.
+		// to an empty result with OK=false. Full happy-path is covered by
+		// integration tests with a real runner.
 		t.Skip("runner spawn failed (expected with /dev/null binary); covered by integration tests")
 	}
-	if !resumed {
-		t.Error("resumed = false, want true")
+	if !got.Resumed {
+		t.Error("Resumed = false, want true")
 	}
-	if gotUUID == "" {
+	if got.UUID == "" {
 		t.Error("UUID is empty, want non-empty")
 	}
-	_ = gotUUID
 }
 
 func TestResolveActiveSession_NoSession(t *testing.T) {
@@ -82,14 +81,14 @@ func TestResolveActiveSession_NoSession(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	gotUUID, resumed, ok := a.ResolveActiveSession(idea.Slug)
-	if ok {
-		t.Errorf("ok = true, want false")
+	got := a.ResolveActiveSession(idea.Slug)
+	if got.OK {
+		t.Errorf("OK = true, want false")
 	}
-	if resumed {
-		t.Errorf("resumed = true, want false")
+	if got.Resumed {
+		t.Errorf("Resumed = true, want false")
 	}
-	if gotUUID != "" {
-		t.Errorf("UUID = %q, want empty", gotUUID)
+	if got.UUID != "" {
+		t.Errorf("UUID = %q, want empty", got.UUID)
 	}
 }

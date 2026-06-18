@@ -617,26 +617,40 @@ func (a *App) StartRootSession(agentType string) (*SessionStartResult, error) {
 	return &SessionStartResult{UUID: sessionUUID}, nil
 }
 
+// ActiveSessionResolution is the wire shape ResolveActiveSession returns to
+// the frontend. Wails only marshals the first non-error return value, so
+// multi-return Go shapes collapse to a single-field Promise<string> on the TS
+// side; using a struct preserves the (uuid, resumed, ok) triple end-to-end.
+//
+// OK=false means no session existed and no resume succeeded; the caller falls
+// back to the idea detail page. Resumed=true means a dormant session was
+// awakened to satisfy the call.
+type ActiveSessionResolution struct {
+	UUID    string `json:"uuid"`
+	Resumed bool   `json:"resumed"`
+	OK      bool   `json:"ok"`
+}
+
 // ResolveActiveSession implements the ideate://ideas/<slug>/active-session
 // resolution chain:
 //
-//  1. If a running session exists for the idea (any agent_type) → (uuid, false, true).
-//  2. Else if a dormant session exists → resume it, return (uuid, true, true).
-//  3. Else → ("", false, false); caller falls back to the idea detail page.
+//  1. If a running session exists for the idea (any agent_type) → uuid, ok=true.
+//  2. Else if a dormant session exists → resume it; return uuid, resumed=true, ok=true.
+//  3. Else → empty result with ok=false; caller falls back to the idea detail page.
 //
 // For step 2 the most-recent dormant session's Agent field drives the resume.
 // StartIdeaSession errors (e.g. no runner registered) fall through to the
 // no-session case.
-func (a *App) ResolveActiveSession(slug string) (uuid string, resumed bool, ok bool) {
+func (a *App) ResolveActiveSession(slug string) *ActiveSessionResolution {
 	sessions, err := a.svc.ListSessions(a.ctx, slug)
 	if err != nil {
-		return "", false, false
+		return &ActiveSessionResolution{}
 	}
 
 	// Step 1: return first running session (list is started-DESC).
 	for _, s := range sessions {
 		if s.Status == model.SessionStatusRunning {
-			return s.UUID, false, true
+			return &ActiveSessionResolution{UUID: s.UUID, OK: true}
 		}
 	}
 
@@ -645,13 +659,13 @@ func (a *App) ResolveActiveSession(slug string) (uuid string, resumed bool, ok b
 		if s.Status == model.SessionStatusDormant {
 			res, err := a.StartIdeaSession(slug, s.Agent, true)
 			if err != nil {
-				return "", false, false
+				return &ActiveSessionResolution{}
 			}
-			return res.UUID, true, true
+			return &ActiveSessionResolution{UUID: res.UUID, Resumed: true, OK: true}
 		}
 	}
 
-	return "", false, false
+	return &ActiveSessionResolution{}
 }
 
 // GetRunningIdeaSession returns the running session for (slug, agentType),
