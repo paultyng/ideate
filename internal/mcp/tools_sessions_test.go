@@ -552,13 +552,16 @@ func TestSendSessionInput_WrapsAndAuditLogs(t *testing.T) {
 		t.Fatalf("expected 2 writes (body + submit) to alpha-running, got %d", len(writes))
 	}
 	body := string(writes[0])
-	// Default include_reply_hint=true → prefix advertises the reply
-	// tool. Prefix lands on its own prompt-buffer line via the soft
-	// newline (\x1b\r — same byte sequence Shift+Enter emits in
-	// TerminalPanel).
-	wantPrefix := "[Input from Orchestrating Agent — reply via the `reply_to_orchestrator` MCP tool]\x1b\r"
+	// Default include_reply_hint=false → bare orchestrator prefix; no
+	// reply_to_orchestrator advertisement. Prefix lands on its own
+	// prompt-buffer line via the soft newline (\x1b\r — same byte
+	// sequence Shift+Enter emits in TerminalPanel).
+	wantPrefix := "[Input from Orchestrating Agent]\x1b\r"
 	if !strings.HasPrefix(body, wantPrefix) {
-		t.Errorf("body missing orchestrator prefix+soft-newline: %q", body)
+		t.Errorf("body missing bare orchestrator prefix+soft-newline: %q", body)
+	}
+	if strings.Contains(body, "reply_to_orchestrator") {
+		t.Errorf("default body should NOT advertise reply_to_orchestrator: %q", body)
 	}
 	if !strings.Contains(body, "hello agent") {
 		t.Errorf("body missing payload text: %q", body)
@@ -763,8 +766,10 @@ func TestGetSessionOutput_RefusesOrchestratorTarget(t *testing.T) {
 	}
 }
 
-// include_reply_hint=false drops the "reply via reply_to_orchestrator"
-// suffix on the prefix so one-way fire-and-forget sends look minimal.
+// include_reply_hint=false matches the default (fire-and-forget). The
+// explicit-false test documents intent at call sites that want to be
+// loud about not wanting a reply; behavior matches the no-arg default
+// covered by TestSendSessionInput_WrapsAndAuditLogs.
 func TestSendSessionInput_NoReplyHint(t *testing.T) {
 	t.Parallel()
 	m, _, resolver := setupOrchestrator(t)
@@ -790,6 +795,36 @@ func TestSendSessionInput_NoReplyHint(t *testing.T) {
 	}
 	if strings.Contains(body, "reply_to_orchestrator") {
 		t.Errorf("body should NOT mention reply_to_orchestrator when hint disabled: %q", body)
+	}
+}
+
+// include_reply_hint=true opts into the reply advertisement so the
+// receiving agent learns about reply_to_orchestrator. Used when the
+// orchestrator actually wants a structured reply routed back (the
+// non-default, interactive-orchestration path).
+func TestSendSessionInput_ReplyHintOptIn(t *testing.T) {
+	t.Parallel()
+	m, _, resolver := setupOrchestrator(t)
+
+	handler := m.handleSendSessionInput("orchestrator-ses")
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"uuid":               "alpha-running",
+		"text":               "please reply when done",
+		"include_reply_hint": true,
+	}
+
+	res, err := handler(context.Background(), req)
+	if err != nil || res.IsError {
+		t.Fatalf("handler error: %v %v", err, res.Content)
+	}
+
+	resolver.writesMu.Lock()
+	body := string(resolver.writes["alpha-running"][0])
+	resolver.writesMu.Unlock()
+	wantPrefix := "[Input from Orchestrating Agent — reply via the `reply_to_orchestrator` MCP tool]\x1b\r"
+	if !strings.HasPrefix(body, wantPrefix) {
+		t.Errorf("body missing reply-hint prefix: %q", body)
 	}
 }
 

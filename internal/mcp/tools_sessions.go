@@ -408,7 +408,7 @@ func sendSessionInputTool() mcp.Tool {
 				},
 				"include_reply_hint": map[string]any{
 					"type":        "boolean",
-					"description": "If true (default), the prefix advertises the `reply_to_orchestrator` tool so the receiver knows it can route a structured reply back. Pass false for one-way sends.",
+					"description": "If true, the prefix advertises the `reply_to_orchestrator` tool so the receiver knows it can route a structured reply back. Default `false` — sends are fire-and-forget; set true only for interactive orchestration where you actually want a reply.",
 				},
 			},
 			Required: []string{"uuid", "text"},
@@ -773,8 +773,9 @@ const orchestratorInputPrefix = "[Input from Orchestrating Agent]"
 // orchestratorInputPrefixWithReplyHint advertises the reverse channel
 // so the receiving idea agent knows it can reply via the
 // `reply_to_orchestrator` MCP tool. Used when send_session_input is
-// invoked with include_reply_hint=true (the default — most delegated
-// turns benefit from a structured reply path).
+// invoked with include_reply_hint=true — an explicit opt-in for
+// interactive orchestration where the caller wants a structured reply
+// routed back. The default is fire-and-forget (no reply hint).
 const orchestratorInputPrefixWithReplyHint = "[Input from Orchestrating Agent — reply via the `reply_to_orchestrator` MCP tool]"
 
 // replyInputPrefix marks input typed BACK to the orchestrator from
@@ -893,12 +894,14 @@ func (m *Manager) handleSendSessionInput(sessionID string) server.ToolHandlerFun
 			}
 		}
 
-		// Pick the prefix variant. include_reply_hint defaults to true
-		// so the receiver learns about the reverse channel; pass false
-		// for one-way fire-and-forget sends where a reply isn't useful.
-		prefix := orchestratorInputPrefixWithReplyHint
-		if !request.GetBool("include_reply_hint", true) {
-			prefix = orchestratorInputPrefix
+		// Pick the prefix variant. include_reply_hint defaults to false
+		// — sends are fire-and-forget; the user explicitly opts in to a
+		// reverse channel for interactive orchestration. Default-on
+		// caused the orchestrator to relay session output and pull the
+		// user back into a loop they'd already said they'd drive.
+		prefix := orchestratorInputPrefix
+		if request.GetBool("include_reply_hint", false) {
+			prefix = orchestratorInputPrefixWithReplyHint
 		}
 		if err := m.writeBufferedInput(targetUUID, prefix, text, request.GetBool("submit", true)); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("writing to session: %v", err)), nil
