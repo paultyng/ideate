@@ -617,6 +617,43 @@ func (a *App) StartRootSession(agentType string) (*SessionStartResult, error) {
 	return &SessionStartResult{UUID: sessionUUID}, nil
 }
 
+// ResolveActiveSession implements the ideate://ideas/<slug>/active-session
+// resolution chain:
+//
+//  1. If a running session exists for the idea (any agent_type) → (uuid, false, true).
+//  2. Else if a dormant session exists → resume it, return (uuid, true, true).
+//  3. Else → ("", false, false); caller falls back to the idea detail page.
+//
+// For step 2 the most-recent dormant session's Agent field drives the resume.
+// StartIdeaSession errors (e.g. no runner registered) fall through to the
+// no-session case.
+func (a *App) ResolveActiveSession(slug string) (uuid string, resumed bool, ok bool) {
+	sessions, err := a.svc.ListSessions(a.ctx, slug)
+	if err != nil {
+		return "", false, false
+	}
+
+	// Step 1: return first running session (list is started-DESC).
+	for _, s := range sessions {
+		if s.Status == model.SessionStatusRunning {
+			return s.UUID, false, true
+		}
+	}
+
+	// Step 2: resume first dormant session.
+	for _, s := range sessions {
+		if s.Status == model.SessionStatusDormant {
+			res, err := a.StartIdeaSession(slug, s.Agent, true)
+			if err != nil {
+				return "", false, false
+			}
+			return res.UUID, true, true
+		}
+	}
+
+	return "", false, false
+}
+
 // GetRunningIdeaSession returns the running session for (slug, agentType),
 // or empty fields if none. The persisted Status=="running" record is the
 // source of truth. UUID is empty when no running record exists.
