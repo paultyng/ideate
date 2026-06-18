@@ -26,6 +26,7 @@ import { buildCriticMarkupToolbar } from '../criticmarkup/toolbar'
 import '../criticmarkup/style.css'
 import { splitFrontmatter } from '../lib/frontmatter'
 import { classify, openExternal } from '../lib/links'
+import { handleLink } from '../lib/deeplink'
 import { useDirtyGuard } from '../hooks/useDirtyGuard'
 import CommentPopover from '../components/CommentPopover'
 
@@ -207,8 +208,9 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
     }
 
     // Same link-classification rules as MarkdownViewer. Reviews aren't
-    // idea-bound so there's no repo list — only external/anchor/unhandled
-    // are reachable. Capture-phase listener beats Crepe's own bindings.
+    // idea-bound so there's no repo list — only external/ideate/anchor/
+    // unhandled are reachable. Capture-phase listener beats Crepe's own
+    // bindings.
     const onClick = (e: MouseEvent) => {
       const a = (e.target as HTMLElement | null)?.closest('a')
       if (!a) return
@@ -216,6 +218,9 @@ export default function MarkdownReview({ review, standalone, backToSession, onSt
       if (result.kind === 'external') {
         e.preventDefault()
         openExternal(result.url)
+      } else if (result.kind === 'ideate') {
+        e.preventDefault()
+        handleLink(result.url, navigate)
       } else if (result.kind === 'unhandled') {
         e.preventDefault()
       }

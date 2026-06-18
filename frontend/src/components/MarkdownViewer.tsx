@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Crepe } from '@milkdown/crepe'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame-dark.css'
 
 import { splitFrontmatter } from '../lib/frontmatter'
+import { handleLink } from '../lib/deeplink'
 import { classify, openExternal, gitHubBlobURL } from '../lib/links'
 import type { store } from '../wailsjs/go/models'
 
@@ -36,6 +38,7 @@ interface Props {
 // header for the decision tree.
 export default function MarkdownViewer({ content, className, sourcePath, repos, onSelectFile }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const navigate = useNavigate()
 
   useEffect(() => {
     const root = containerRef.current
@@ -70,6 +73,10 @@ export default function MarkdownViewer({ content, className, sourcePath, repos, 
           e.preventDefault()
           openExternal(result.url)
           return
+        case 'ideate':
+          e.preventDefault()
+          handleLink(result.url, navigate)
+          return
         case 'in-app-md':
           if (onSelectFile) {
             e.preventDefault()
@@ -97,7 +104,7 @@ export default function MarkdownViewer({ content, className, sourcePath, repos, 
     }
     root.addEventListener('click', onClick, true)
     return () => { root.removeEventListener('click', onClick, true) }
-  }, [sourcePath, repos, onSelectFile])
+  }, [sourcePath, repos, onSelectFile, navigate])
 
   return <div ref={containerRef} className={className} />
 }
