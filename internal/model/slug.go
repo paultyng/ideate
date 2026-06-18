@@ -14,7 +14,24 @@ var (
 
 	nonAlnumHyphen = regexp.MustCompile(`[^a-z0-9-]`)
 	multiHyphen    = regexp.MustCompile(`-{2,}`)
+
+	// validSlugRe matches the slug shape Slugify produces:
+	// lowercase ASCII alphanumerics + interior hyphens, starting with
+	// alphanumeric. Used at boundaries that accept agent- or URL-
+	// supplied slugs (e.g. ResolveActiveSession via ideate:// links)
+	// to reject path-traversal segments like `..` or `foo/bar`.
+	validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
+
+// IsValidSlug reports whether s has the on-disk slug shape (lowercase
+// alphanumerics + hyphens, no path separators, no leading hyphen).
+// Use at boundaries that receive untrusted-source slugs (URL parsers,
+// MCP arguments, deep links) before passing the value to filesystem
+// operations. Internal Go callers can skip this — slugs minted by
+// Slugify / GenerateSlug always satisfy it.
+func IsValidSlug(s string) bool {
+	return validSlugRe.MatchString(s)
+}
 
 // ParseSlug extracts an optional created-time and human name from a
 // slug. Date-prefixed slugs (the legacy default) yield a real time;

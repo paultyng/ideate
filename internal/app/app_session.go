@@ -622,9 +622,10 @@ func (a *App) StartRootSession(agentType string) (*SessionStartResult, error) {
 // multi-return Go shapes collapse to a single-field Promise<string> on the TS
 // side; using a struct preserves the (uuid, resumed, ok) triple end-to-end.
 //
-// OK=false means no session existed and no resume succeeded; the caller falls
-// back to the idea detail page. Resumed=true means a dormant session was
-// awakened to satisfy the call.
+// OK=false covers three cases collapsed into a single fall-back: no
+// session existed; the dormant-resume attempt failed; or the slug
+// failed validation. The caller in all cases falls back to the idea
+// detail page. Resumed=true means a dormant session was awakened.
 type ActiveSessionResolution struct {
 	UUID    string `json:"uuid"`
 	Resumed bool   `json:"resumed"`
@@ -634,16 +635,31 @@ type ActiveSessionResolution struct {
 // ResolveActiveSession implements the ideate://ideas/<slug>/active-session
 // resolution chain:
 //
-//  1. If a running session exists for the idea (any agent_type) → uuid, ok=true.
-//  2. Else if a dormant session exists → resume it; return uuid, resumed=true, ok=true.
-//  3. Else → empty result with ok=false; caller falls back to the idea detail page.
+//  1. Reject invalid slugs (path-traversal / wrong charset) — empty result.
+//  2. If a running session exists for the idea (any agent_type) → uuid, ok=true.
+//  3. Else iterate dormant sessions; resume the first one that starts
+//     cleanly. A failing dormant doesn't abort — continue to the next
+//     candidate (different agent type, different runner state).
+//  4. Else → empty result with ok=false; caller falls back to the idea
+//     detail page.
 //
-// For step 2 the most-recent dormant session's Agent field drives the resume.
-// StartIdeaSession errors (e.g. no runner registered) fall through to the
-// no-session case.
+// The slug arrives from a URL parser on the frontend (`ideate://ideas/<slug>/active-session`).
+// Validate before it reaches `ListSessions` → `filepath.Join`; an
+// attacker-controlled markdown body or terminal output could otherwise
+// embed `ideate://ideas/../active-session` and traverse outside the
+// ideas root. Single-user desktop bounds the blast radius, but the
+// guard is cheap.
 func (a *App) ResolveActiveSession(slug string) *ActiveSessionResolution {
+	if !model.IsValidSlug(slug) {
+		slog.Warn("resolve active session: invalid slug",
+			slog.String("slug", slug))
+		return &ActiveSessionResolution{}
+	}
+
 	sessions, err := a.svc.ListSessions(a.ctx, slug)
 	if err != nil {
+		slog.Warn("resolve active session: listing sessions",
+			slog.String("slug", slug), slog.Any("err", err))
 		return &ActiveSessionResolution{}
 	}
 
@@ -654,15 +670,24 @@ func (a *App) ResolveActiveSession(slug string) *ActiveSessionResolution {
 		}
 	}
 
-	// Step 2: resume first dormant session.
+	// Step 2: resume the first dormant session whose StartIdeaSession
+	// succeeds. A single failing candidate (no registered runner for
+	// that agent type, missing binary, etc.) shouldn't shadow other
+	// dormant entries — fall through and try the next.
 	for _, s := range sessions {
-		if s.Status == model.SessionStatusDormant {
-			res, err := a.StartIdeaSession(slug, s.Agent, true)
-			if err != nil {
-				return &ActiveSessionResolution{}
-			}
-			return &ActiveSessionResolution{UUID: res.UUID, Resumed: true, OK: true}
+		if s.Status != model.SessionStatusDormant {
+			continue
 		}
+		res, err := a.StartIdeaSession(slug, s.Agent, true)
+		if err != nil {
+			slog.Warn("resolve active session: resuming dormant",
+				slog.String("slug", slug),
+				slog.String("uuid", s.UUID),
+				slog.String("agent", s.Agent),
+				slog.Any("err", err))
+			continue
+		}
+		return &ActiveSessionResolution{UUID: res.UUID, Resumed: true, OK: true}
 	}
 
 	return &ActiveSessionResolution{}
