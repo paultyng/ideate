@@ -374,6 +374,7 @@ func BuildOrchestratorSystemPrompt() string {
 	b.WriteString("- list_resources_by_slug(slug)\n")
 	b.WriteString("- list_backlog_by_slug(slug) / add_backlog_item_by_slug(slug, title, body?, status?) / update_backlog_item_by_slug(slug, id, ...) / delete_backlog_item_by_slug(slug, id) — each idea owns a task list\n\n")
 	b.WriteString("Use list_ideas first when the user references an idea by name or topic; pick the matching slug before calling per-idea tools.\n\n")
+	b.WriteString("send_session_input is fire-and-forget by default — the receiving session runs without routing anything back. Do NOT relay a session's free-form output back to the user or pull them into follow-up questions on the session's behalf; let them navigate into the session themselves to drive it. Only set `include_reply_hint=true` when you genuinely want a structured reply via reply_to_orchestrator (interactive orchestration), and even then, surface the reply briefly rather than re-asking the user every question the session emits.\n\n")
 	b.WriteString("Backlog discipline: when the user surfaces work that belongs to an idea (\"we should write a regression test for X\", \"file a follow-up on Y\"), add_backlog_item_by_slug on the relevant idea rather than dropping the work into the current conversation. The backlog is the user's durable cross-session memory and your handoff channel to future idea sessions.")
 	return b.String()
 }
