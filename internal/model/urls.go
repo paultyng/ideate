@@ -1,11 +1,13 @@
 package model
 
-// IdeateURLScheme is the custom URL scheme Ideate registers with the
-// OS so deep-links emitted by skills, agents, and orchestrator
-// prompts route back into the app. Skills render these as
-// markdown-style hyperlinks; the user clicks; the OS hands the URL
-// off to Ideate's protocol handler which translates the path into
-// the matching HashRouter route.
+// IdeateURLScheme is the custom URL scheme used by deep-links that
+// agents, skills, and orchestrator prompts emit so the user can click
+// to navigate inside Ideate. In-process clicks (inside Ideate's own
+// xterm terminals or markdown views) route via the frontend
+// `handleLink` dispatcher (see `frontend/src/lib/deeplink.ts`); the
+// OS-level scheme handler (`open ideate://...` from a shell or other
+// app) is wired via Wails' `Mac.OnUrlOpen` callback and forwards the
+// URL to the same dispatcher.
 //
 // Path grammar:
 //
