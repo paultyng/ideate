@@ -252,6 +252,42 @@ test.describe('Terminal link clicks', () => {
       .toContain('https://example.com/plain-url?via=weblinks')
   })
 
+  test('plain ideate:// URL click routes in-app via HashRouter (WebLinksAddon urlRegex path)', async ({ page }) => {
+    await page.goto('/')
+    await enablePtyCapture(page)
+
+    const uuid = await page.evaluate(async () => {
+      // @ts-expect-error wails binding
+      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
+      return r.uuid
+    })
+
+    const containerSelector = '.orchestrator-host .terminal-container'
+    await page.waitForSelector(containerSelector, { timeout: 10000 })
+    await patchBrowserOpenURL(page)
+    await waitForAgentReady(page, uuid)
+
+    // Type an ideate:// URL into the terminal so WebLinksAddon's
+    // extended urlRegex (matches https?|ideate) picks it up.
+    await page.evaluate(async (id) => {
+      // @ts-expect-error wails binding
+      await window.go.app.App.WriteToSession(id, 'open ideate://orchestrator for cross-idea work\r')
+    }, uuid)
+
+    await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
+      .toContain('ideate://orchestrator')
+
+    const clicked = await clickLinkRow(page, containerSelector, 'ideate://orchestrator')
+    expect(clicked).toBeTruthy()
+
+    // Asserts the dispatcher routed in-app: HashRouter route changed
+    // to /orchestrator AND BrowserOpenURL was NOT invoked for the
+    // ideate: scheme.
+    await expect(page).toHaveURL(/#\/orchestrator(?:$|\?)/, { timeout: 5000 })
+    const opens = (await getCapturedURLs(page)).urls
+    expect(opens.filter((u) => u.startsWith('ideate://'))).toEqual([])
+  })
+
   test('OSC 8 hyperlink click routes through openExternal after drawer drag', async ({ page }) => {
     await page.goto('/')
     await enablePtyCapture(page)

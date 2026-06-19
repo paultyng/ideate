@@ -2,6 +2,7 @@
 // resource sidebar items, and the terminal addon.
 //
 // Decision tree (markdown contexts):
+//   absolute ideate://         → handleLink (in-app HashRouter routing, see deeplink.ts)
 //   absolute http/https/mailto → openExternal  (Wails BrowserOpenURL)
 //   "#anchor"                  → caller decides (scroll, etc.)
 //   relative *.md / *.markdown → onSelectFile(resolvedPath)
@@ -16,6 +17,7 @@ import type { store } from '../wailsjs/go/models'
 
 export type Classified =
   | { kind: 'external'; url: string }
+  | { kind: 'ideate'; url: string }
   | { kind: 'anchor'; hash: string }
   | { kind: 'in-app-md'; path: string }
   | { kind: 'repo-file'; repo: string; relPath: string }
@@ -47,6 +49,13 @@ export function classify(
 
   if (href.startsWith('#')) {
     return { kind: 'anchor', hash: href.slice(1) }
+  }
+
+  // ideate:// URLs route in-app via deeplink.ts's handleLink. Checked
+  // before the http allow-list so they don't fall to 'unhandled' (the
+  // allow-list only matches http/https/mailto).
+  if (href.startsWith('ideate://')) {
+    return { kind: 'ideate', url: href }
   }
 
   // Absolute URL — try parsing without a base. URL throws for relative.

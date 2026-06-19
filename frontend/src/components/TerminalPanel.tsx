@@ -1,10 +1,11 @@
 import { useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { EventsOn } from '../wailsjs/runtime/runtime'
-import { openExternal } from '../lib/links'
+import { handleLink } from '../lib/deeplink'
 import { capturePty } from '../lib/ptyCapture'
 import { termDebug } from '../lib/termDebug'
 import '@xterm/xterm/css/xterm.css'
@@ -36,6 +37,7 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -51,9 +53,10 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
       fontSize: 13,
       // OSC 8 hyperlinks (escape-sequence links with display text distinct
       // from the href, e.g. as emitted by `gh`, `claude`, modern coreutils).
-      // The addon below handles plain-text URLs separately.
+      // handleLink dispatches: ideate:// → in-app HashRouter; others →
+      // openExternal allow-list (http/https/mailto).
       linkHandler: {
-        activate: (_, uri) => { openExternal(uri) },
+        activate: (_, uri) => { handleLink(uri, navigate) },
       },
     })
     terminalRef.current = terminal
@@ -69,10 +72,15 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
     fitAddonRef.current = fitAddon
     terminal.loadAddon(fitAddon)
 
-    // Plain-URL link matcher — turns http/https tokens in raw output into
-    // hoverable links. Click routes through the same scheme-allow-listed
-    // BrowserOpenURL path as everything else.
-    terminal.loadAddon(new WebLinksAddon((_, uri) => { openExternal(uri) }))
+    // Plain-URL link matcher — turns http/https AND ideate:// tokens in raw
+    // output into hoverable links. The `urlRegex` option (per
+    // @xterm/addon-web-links ILinkProviderOptions) overrides the default
+    // http-only matcher. Click routes through handleLink, which dispatches
+    // ideate:// in-app and everything else through openExternal.
+    terminal.loadAddon(new WebLinksAddon(
+      (_, uri) => { handleLink(uri, navigate) },
+      { urlRegex: /(https?|ideate):\/\/[^\s)]+/g },
+    ))
 
     terminal.open(containerRef.current)
 

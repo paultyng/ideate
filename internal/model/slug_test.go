@@ -161,3 +161,43 @@ func TestSlugify(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidSlug(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		s    string
+		want bool
+	}{
+		// Valid shapes (what Slugify produces).
+		{"foo", true},
+		{"foo-bar", true},
+		{"2026-04-21-batch-processing", true},
+		{"a", true},
+		{"a1b2c3", true},
+
+		// Invalid: path-traversal and separators.
+		{"", false},
+		{"..", false},
+		{"../etc", false},
+		{"foo/bar", false},
+		{"foo\\bar", false},
+
+		// Invalid: charset / case / structure.
+		{"Foo", false},      // uppercase
+		{"-leading", false}, // leading hyphen
+		{"trailing-", true}, // trailing hyphen is allowed by the regex (cosmetic, not a security issue)
+		{"foo bar", false},  // space
+		{"foo.bar", false},  // dot
+		{"foo_bar", false},  // underscore
+		{"foo:bar", false},  // colon
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.s, func(t *testing.T) {
+			t.Parallel()
+			if got := IsValidSlug(c.s); got != c.want {
+				t.Errorf("IsValidSlug(%q) = %v, want %v", c.s, got, c.want)
+			}
+		})
+	}
+}

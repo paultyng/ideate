@@ -72,6 +72,7 @@ Dormancy is now set only by the startup adoption sweep — sessions whose PID is
 - [ ] Orchestrator `list_sessions` MCP includes dormant entries with `status: "dormant"`
 - [ ] Orchestrator `get_session_output` on a dormant session: returns last-captured terminal output without crashing
 - [ ] Orchestrator `send_session_input` on a dormant session: resumes the session and submits input
+- [ ] **Active-session deep link with a dormant target**: open an idea with only dormant sessions, click an `ideate://ideas/<slug>/active-session` link (terminal or markdown). `App.ResolveActiveSession` should call `StartIdeaSession(resume=true)`, the dormant session should resume, and the webview should navigate to `/idea/<slug>/session/<uuid>`. Unit tests cover the `slug→empty` fall-through with a `/dev/null` runner; the resume happy path requires a real runner binary and is covered here.
 
 ## Orphan Recovery
 
