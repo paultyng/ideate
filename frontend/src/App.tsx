@@ -3,6 +3,7 @@ import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { Home, Notebook, Plus } from 'lucide-react'
 import { useWailsNavigation } from './hooks/useNavigation'
 import { useOrchestratorDrawer } from './hooks/useOrchestratorDrawer'
+import { handleLink } from './lib/deeplink'
 import { EventsOn, WindowIsFullscreen, WindowToggleMaximise } from './wailsjs/runtime/runtime'
 import IdeaList from './views/IdeaList'
 import IdeaDetail from './views/IdeaDetail'
@@ -32,6 +33,20 @@ function useOrchestratorNavBridge() {
   useEffect(() => {
     const cancel = EventsOn('orchestrator:navigate', (payload: { path?: string }) => {
       if (payload?.path) navigate(payload.path)
+    })
+    return () => cancel()
+  }, [navigate])
+}
+
+// useOSDeeplinkBridge subscribes to the `deeplink` event emitted by
+// App.HandleOpenURL (Mac.OnUrlOpen) and routes the URL through the
+// same handleLink dispatcher that powers in-app terminal/markdown
+// clicks. Single source of truth for ideate:// grammar handling.
+function useOSDeeplinkBridge(): void {
+  const navigate = useNavigate()
+  useEffect(() => {
+    const cancel = EventsOn('deeplink', (url: string) => {
+      if (url) handleLink(url, navigate)
     })
     return () => cancel()
   }, [navigate])
@@ -191,6 +206,7 @@ function AppTopbar({ orchestratorPinned }: { orchestratorPinned: boolean }) {
 export default function App() {
   useWailsNavigation()
   useOrchestratorNavBridge()
+  useOSDeeplinkBridge()
   useIdeaRenamedRedirect()
   useFullscreenBodyAttr()
   useDisableWebviewNav()
