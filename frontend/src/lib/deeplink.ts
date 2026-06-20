@@ -1,7 +1,9 @@
 // In-app routing for `ideate://` URLs. Agent-emitted deep links inside
 // xterm terminals and markdown views become clickable and navigate the
-// running webview via HashRouter — no OS scheme registration (that's
-// backlog item 6e88c3eb, separate).
+// running webview via HashRouter. OS-level scheme dispatch (`open
+// ideate://...` from a shell or other app) lands on this same handler
+// via Wails Mac.OnUrlOpen → EventsEmit("deeplink") → useOSDeeplinkBridge
+// in App.tsx.
 //
 // Grammar (canonical in `internal/model/urls.go`):
 //

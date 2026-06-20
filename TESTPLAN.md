@@ -228,12 +228,12 @@ Only one pending review (any kind, any path or range) is allowed at a time. Whil
 - [ ] Window focus on terminal→new transition: minimize the daemon window between submit and the new `review * start`, then start the new review — window unminimizes and comes to the front
 - [ ] Reopen-by-ID of a different terminal review (`task cli -- review <other-id>`) → window navigates, kind auto-detected
 
-## Deep-Links (`ideate://`)
+## Deep-Links (`ideate://`) — in-process
 
-- [ ] MCP tool responses (e.g. `get_idea`) include `ideate://idea/<slug>` deep-links in text fields
+Canonical grammar lives in `internal/model/urls.go` and `frontend/src/lib/deeplink.ts::translateIdeateURL`. Note the plural: `ideate://ideas/<slug>` (NOT `idea/`). The OS-scheme variants (cold-start / hot-launch via `open`) have their own section below.
+
+- [ ] MCP tool responses (e.g. `get_idea`) include `ideate://ideas/<slug>` deep-links in text fields
 - [ ] Clicking a deep-link in the orchestrator terminal navigates the main view to the target idea
-- [ ] macOS: `open ideate://idea/<slug>` from a fresh terminal launches the app (cold start) to the target idea
-- [ ] macOS: with the app running, `open ideate://idea/<slug>` (hot launch) brings the existing window to front and navigates
 
 ## Resource Operations (MCP)
 
