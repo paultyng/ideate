@@ -99,23 +99,9 @@ Agent integration is via MCP — any tool with an MCP server (or a thin CLI shim
 
 See [CLAUDE.md](CLAUDE.md) for the architecture overview, data model, and resolved decisions. Short version: each idea is a directory with an `idea.md` (YAML frontmatter + Markdown body) plus per-idea sessions, history, and backlog; agent integration is via an Ideate MCP server + HTTP hooks; the desktop UI is React in a system webview via [Wails](https://wails.io/) v2.
 
-## Development
-
-```sh
-task dev          # wails dev against an isolated, seeded .ideate-dev
-task dev:user     # wails dev against your real ideas dir (dogfood)
-
-task test         # Go tests with race detector
-task test:ui      # Playwright tests against wails dev
-task lint         # golangci-lint
-task ci           # full CI pipeline
-```
-
-For local port assignments and contributor setup details, see [docs/development.md](docs/development.md).
-
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines. [CLAUDE.md](CLAUDE.md) covers the architecture and data model. Run `task ci` before pushing.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [docs/development.md](docs/development.md) for the dev-loop commands and local port assignments. [CLAUDE.md](CLAUDE.md) covers the architecture and data model. Run `task ci` before pushing.
 
 ## Similar Software / Prior Art
 

@@ -87,8 +87,12 @@ test.describe('Demos', () => {
     // Select the top match.
     await page.keyboard.press('Enter')
 
-    // Confirm we navigated to the latency idea, then hold.
-    await expect(page).toHaveURL(/p99-latency-regression/, { timeout: 3000 })
+    // Confirm we navigated INTO the latency idea's session (not the
+    // idea-detail page). The seeded dormant session auto-resumes via
+    // useNavigateToIdeaSession → ResumeIdeaSession → /idea/<slug>/session/<uuid>.
+    // Without a seeded session the GIF would end on the metadata page,
+    // contradicting the actual quick-switch UX.
+    await expect(page).toHaveURL(/\/idea\/p99-latency-regression-in-search\/session\//, { timeout: 5000 })
     await holdFinalFrame(page)
   })
 
