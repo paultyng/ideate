@@ -328,23 +328,48 @@ tasks:
         # On exit, kill ONLY the wails dev subtree this task launched.
         # Previous incarnation pkill'd by command-line regex, which
         # matched the user's production /Applications/ideate.app and any
-        # `task dev`/`task dev:user` they had running. PID-scoped now.
+        # `task dev`/`task dev:user` they had running. Two-pronged scope:
+        #
+        # 1. Port owner: wails dev binds 34116; lsof -ti gives us its PID
+        #    regardless of parentage (wails dev daemonizes via fork-then-
+        #    reparent-to-launchd, so the WAILS_DEV_PID we captured loses
+        #    descendants by the time cleanup runs).
+        # 2. WAILS_DEV_PID fallback: catches the boot-window case where
+        #    wails dev exited before binding, but children (vite, dev
+        #    ideate binary) are still alive.
         WAILS_DEV_PID=""
+        # find_dev_pids prints the PID(s) that belong to this task's dev
+        # tree, sourced from three signals (deduped):
+        #   1. The wails dev process whose argv carries the unique
+        #      `-devserver localhost:34116` (won't match production
+        #      Ideate or any `task dev:user` on 34115).
+        #   2. Whatever owns port 34116 (often the dev ideate bundle
+        #      child, NOT wails dev itself).
+        #   3. The subshell we backgrounded as WAILS_DEV_PID, if still
+        #      alive — covers the boot window before wails dev daemonized.
+        find_dev_pids() {
+          {
+            pgrep -f 'wails dev.*-devserver localhost:34116' 2>/dev/null
+            lsof -ti :34116 2>/dev/null
+            [ -n "$WAILS_DEV_PID" ] && kill -0 "$WAILS_DEV_PID" 2>/dev/null && echo "$WAILS_DEV_PID"
+          } | sort -u
+        }
         cleanup() {
-          [ -n "$WAILS_DEV_PID" ] && kill_tree "$WAILS_DEV_PID"
+          local pid
+          for pid in $(find_dev_pids); do
+            kill_tree "$pid"
+          done
         }
         trap cleanup EXIT
 
-        # Pre-launch port cleanup: claim 34116 by killing whatever owns
-        # it (almost certainly a stale wails-dev from a crashed test run).
-        # Surgical — won't touch the user's production Ideate or any
-        # `task dev:user` on 34115.
-        STALE=$(lsof -ti :34116 2>/dev/null || true)
-        if [ -n "$STALE" ]; then
-          echo "Killing stale process on port 34116: $STALE"
-          echo "$STALE" | xargs -n1 kill -KILL 2>/dev/null || true
-          sleep 0.3
-        fi
+        # Pre-launch cleanup: kill any stale process from a crashed
+        # test run that holds the wails dev port or matches our unique
+        # argv. Surgical — won't touch production /Applications/ideate.app
+        # or any `task dev:user` on 34115.
+        for pid in $(find_dev_pids); do
+          echo "Killing stale process: $pid"
+          kill_tree "$pid"
+        done
 
         # Start wails dev in background (isolated config + ideas dir).
         # Wails dev on 34116, hooks on 34119 so test:ui can run alongside
