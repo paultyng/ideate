@@ -306,26 +306,53 @@ tasks:
         set -e
         LOG_FILE="logs/{{.LOG_NAME}}-$(date +%Y%m%d-%H%M%S).log"
 
-        kill_all() {
-          pkill -f 'ideate.app/Contents/MacOS/ideate' 2>/dev/null || true
-          pkill -f 'wails dev' 2>/dev/null || true
-          pkill -f 'vite.*ideate' 2>/dev/null || true
-          sleep 0.5
-          pkill -9 -f 'ideate.app/Contents/MacOS/ideate' 2>/dev/null || true
-          pkill -9 -f 'wails dev' 2>/dev/null || true
-          pkill -9 -f 'vite.*ideate' 2>/dev/null || true
+        # Recursive descendant kill — SIGTERM first, then SIGKILL on
+        # stragglers. Walks the process tree depth-first so children die
+        # before their parent reparents to launchd.
+        kill_tree() {
+          local pid="$1"
+          [ -z "$pid" ] && return 0
+          local child
+          for child in $(pgrep -P "$pid" 2>/dev/null); do
+            kill_tree "$child"
+          done
+          kill -TERM "$pid" 2>/dev/null || true
+          local i
+          for i in 1 2 3 4 5; do
+            kill -0 "$pid" 2>/dev/null || return 0
+            sleep 0.2
+          done
+          kill -KILL "$pid" 2>/dev/null || true
         }
-        trap kill_all EXIT
 
-        # Kill any existing instance
-        kill_all
+        # On exit, kill ONLY the wails dev subtree this task launched.
+        # Previous incarnation pkill'd by command-line regex, which
+        # matched the user's production /Applications/ideate.app and any
+        # `task dev`/`task dev:user` they had running. PID-scoped now.
+        WAILS_DEV_PID=""
+        cleanup() {
+          [ -n "$WAILS_DEV_PID" ] && kill_tree "$WAILS_DEV_PID"
+        }
+        trap cleanup EXIT
+
+        # Pre-launch port cleanup: claim 34116 by killing whatever owns
+        # it (almost certainly a stale wails-dev from a crashed test run).
+        # Surgical — won't touch the user's production Ideate or any
+        # `task dev:user` on 34115.
+        STALE=$(lsof -ti :34116 2>/dev/null || true)
+        if [ -n "$STALE" ]; then
+          echo "Killing stale process on port 34116: $STALE"
+          echo "$STALE" | xargs -n1 kill -KILL 2>/dev/null || true
+          sleep 0.3
+        fi
 
         # Start wails dev in background (isolated config + ideas dir).
         # Wails dev on 34116, hooks on 34119 so test:ui can run alongside
         # both `task dev:user` (34115/34117) and `task dev` (34116/34118).
         TEST_CONFIG="$(mktemp -d)/ideate-test"
         (cd cmd/ideate && IDEATE_CONFIG_DIR="$TEST_CONFIG" IDEATE_IDEAS_DIR="$TEST_CONFIG/ideas" IDEATE_HOOKS_PORT=34119 IDEATE_LOG_DIR="$TEST_CONFIG/logs" IDEATE_CLAUDE_PROJECTS_DIR="$TEST_CONFIG/claude-projects" TESTAGENT_AUTO_EXIT={{.TESTAGENT_AUTO_EXIT}} TESTAGENT_DELAY=50ms wails dev -tags dev -devserver localhost:34116) > "$LOG_FILE" 2>&1 &
-        echo "wails dev started, waiting for server..."
+        WAILS_DEV_PID=$!
+        echo "wails dev started (PID $WAILS_DEV_PID), waiting for server..."
 
         # Poll dev server (max 120s — CI first run is slow)
         for i in $(seq 1 120); do
