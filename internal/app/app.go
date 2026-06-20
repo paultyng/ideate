@@ -101,6 +101,14 @@ type App struct {
 	// summarizer regenerates the idea-level summary sidecar after
 	// each SessionEnd hook. Started in startup, stopped in Shutdown.
 	summarizer *summarizer.Summarizer
+
+	// Deep-link buffer. The macOS Mac.OnUrlOpen callback can fire
+	// before Startup wires up a.ctx (cold-start race), and emitting
+	// to the frontend with a nil ctx panics inside Wails. URLs
+	// arriving early are queued here; Startup drains them once ctx
+	// is set. After that, the queue stays empty.
+	deeplinkMu       sync.Mutex
+	pendingDeeplinks []string
 }
 
 func New(config LaunchConfig) *App {

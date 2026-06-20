@@ -228,12 +228,12 @@ Only one pending review (any kind, any path or range) is allowed at a time. Whil
 - [ ] Window focus on terminal→new transition: minimize the daemon window between submit and the new `review * start`, then start the new review — window unminimizes and comes to the front
 - [ ] Reopen-by-ID of a different terminal review (`task cli -- review <other-id>`) → window navigates, kind auto-detected
 
-## Deep-Links (`ideate://`)
+## Deep-Links (`ideate://`) — in-process
 
-- [ ] MCP tool responses (e.g. `get_idea`) include `ideate://idea/<slug>` deep-links in text fields
+Canonical grammar lives in `internal/model/urls.go` and `frontend/src/lib/deeplink.ts::translateIdeateURL`. Note the plural: `ideate://ideas/<slug>` (NOT `idea/`). The OS-scheme variants (cold-start / hot-launch via `open`) have their own section below.
+
+- [ ] MCP tool responses (e.g. `get_idea`) include `ideate://ideas/<slug>` deep-links in text fields
 - [ ] Clicking a deep-link in the orchestrator terminal navigates the main view to the target idea
-- [ ] macOS: `open ideate://idea/<slug>` from a fresh terminal launches the app (cold start) to the target idea
-- [ ] macOS: with the app running, `open ideate://idea/<slug>` (hot launch) brings the existing window to front and navigates
 
 ## Resource Operations (MCP)
 
@@ -294,3 +294,17 @@ These are covered by automated tests and do NOT need manual verification:
 - Hooks (typed handler dispatch, session finalization, history recording)
 - IPC (server, socket path resolution)
 - Review (diff parsing, local source)
+
+## Deep links (OS scheme)
+
+Deep links wire `open ideate://...` from a shell or other app into the running Ideate window via Wails `Mac.OnUrlOpen` (`internal/app/app_lifecycle.go::HandleOpenURL`). The URL is forwarded to the frontend's `deeplink` event listener (`frontend/src/App.tsx::useOSDeeplinkBridge`) which calls `handleLink` — the same dispatcher used by in-terminal and markdown clicks. Tests require a built, lsregister-registered Ideate.app.
+
+Dev rebuild dance: after each `task build`, run `lsregister -f cmd/ideate/build/bin/ideate.app` to refresh LaunchServices. Production-signed DMG install triggers it automatically.
+
+- [ ] **Cold start**: with Ideate NOT running and `lsregister -f ...` done, `open ideate://ideas/<seeded-slug>` from Terminal — Ideate launches and the visible window lands on `/idea/<slug>` (or its session route if a session is seeded).
+- [ ] **Hot launch**: with Ideate already running, `open ideate://orchestrator` from Terminal — the existing window comes to front (no second process via `pgrep -f ideate | wc -l → 1`) and navigates to `/orchestrator`.
+- [ ] **Active-session deep link with running session**: `open ideate://ideas/<slug>/active-session` on an idea with a running session — navigates to that session's `/idea/<slug>/session/<uuid>`.
+- [ ] **Active-session deep link with dormant session**: same URL on an idea with only dormant sessions — `ResolveActiveSession` resumes the dormant; window navigates to the session route.
+- [ ] **Active-session deep link with no session**: same URL on an idea with no sessions — falls back to `/idea/<slug>`.
+- [ ] **Unknown scheme**: `open ideate://garbage` — no navigation; no crash.
+- [ ] **Markdown-link parity**: from inside a markdown view, an `ideate://orchestrator` link click routes identically (in-process, via `handleLink`); the OS scheme handler is not invoked.

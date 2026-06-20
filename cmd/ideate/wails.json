@@ -15,6 +15,13 @@
     "productName": "Ideate",
     "productVersion": "0.0.0",
     "copyright": "Copyright © 2026 Paul Tyng",
-    "comments": "Idea lifecycle tracker"
+    "comments": "Idea lifecycle tracker",
+    "protocols": [
+      {
+        "scheme": "ideate",
+        "description": "Ideate deep link",
+        "role": "Viewer"
+      }
+    ]
   }
 }

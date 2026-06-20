@@ -29,6 +29,57 @@ import (
 	"github.com/paultyng/ideate/internal/sleep"
 )
 
+// HandleOpenURL is the Mac.OnUrlOpen callback wired in launch.go.
+// macOS LaunchServices routes `open ideate://...` (and clicks on
+// ideate://... links from other apps) here for both cold-start and
+// hot-launch. The URL is forwarded to the frontend's "deeplink"
+// EventsOn listener, which calls handleLink → HashRouter navigation.
+//
+// Cold-start race: kAEGetURL can fire before Startup wires a.ctx.
+// We buffer such URLs and drain them in Startup once ctx is non-nil.
+// Post-Startup invocations dispatch immediately.
+func (a *App) HandleOpenURL(url string) {
+	a.deeplinkMu.Lock()
+	if a.ctx == nil {
+		a.pendingDeeplinks = append(a.pendingDeeplinks, url)
+		a.deeplinkMu.Unlock()
+		return
+	}
+	a.deeplinkMu.Unlock()
+	a.dispatchDeeplink(url)
+}
+
+// dispatchDeeplink emits the URL to the frontend and brings the window
+// forward. macOS doesn't auto-focus the app on URL receipt, so the
+// WindowShow + WindowUnminimise calls are necessary for hot launch.
+// Drops the URL with a warn log if a.ctx isn't set yet — the defensive
+// guard protects callers that reach the dispatch before Startup wires
+// the context (which would otherwise panic inside Wails' EventsEmit).
+func (a *App) dispatchDeeplink(url string) {
+	if a.ctx == nil {
+		slog.Warn("dispatchDeeplink called before Startup wired ctx; dropping",
+			slog.String("url", url))
+		return
+	}
+	wailsRuntime.EventsEmit(a.ctx, "deeplink", url)
+	wailsRuntime.WindowShow(a.ctx)
+	wailsRuntime.WindowUnminimise(a.ctx)
+}
+
+// drainPendingDeeplinks flushes URLs that arrived before the webview
+// was ready. Called once from DomReady after a.ctx is set; after that
+// HandleOpenURL dispatches immediately and the buffer stays empty.
+// Repeat calls are safe (no-ops on empty buffer).
+func (a *App) drainPendingDeeplinks() {
+	a.deeplinkMu.Lock()
+	pending := a.pendingDeeplinks
+	a.pendingDeeplinks = nil
+	a.deeplinkMu.Unlock()
+	for _, url := range pending {
+		a.dispatchDeeplink(url)
+	}
+}
+
 // startEventBridge spawns the goroutine that reads from the app-
 // wide event broker and forwards each event to wailsRuntime.EventsEmit.
 // Single subscriber, runs for the app's lifetime; exits when the
@@ -46,6 +97,11 @@ func (a *App) startEventBridge() {
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Deeplink drain is deferred to DomReady — Startup is too early.
+	// EventsEmit from here would fire before React mounts and wires
+	// its EventsOn('deeplink') listener, and Wails events don't buffer
+	// for late subscribers. See DomReady's call to drainPendingDeeplinks.
 
 	// App-wide event broker. Both the MCP manager and the hooks
 	// handler publish to it; a single bridge goroutine fans events
@@ -428,6 +484,16 @@ func (a *App) DomReady(_ context.Context) {
 		wailsRuntime.WindowSetPosition(a.ctx, a.savedWindowPos.X, a.savedWindowPos.Y)
 	}
 	wailsRuntime.WindowShow(a.ctx)
+
+	// Drain deeplinks buffered before the webview was ready (cold-start
+	// race: Mac.OnUrlOpen fires during NSApplication willFinishLaunching,
+	// well before React mounts). DomReady runs after the DOM is parsed;
+	// React's useEffect (where useOSDeeplinkBridge subscribes) runs on
+	// the next render-commit, typically within a tick. Residual race:
+	// a URL drained here just before useEffect runs would still be
+	// missed. Acceptable for v0.1 (cold-start is rare); a frontend-
+	// triggered "ready" handshake binding is the future-proof fix.
+	a.drainPendingDeeplinks()
 }
 
 // BeforeClose is called when the window is about to close. Returns true to

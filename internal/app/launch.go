@@ -84,6 +84,13 @@ func Launch(config LaunchConfig) error {
 				Title:   "Ideate",
 				Message: "Idea lifecycle tracker\nVersion " + version.Version,
 			},
+			// macOS LaunchServices routes `open ideate://...` (and clicks
+			// on ideate://... links from other apps) here. The handler
+			// forwards the URL to the frontend deeplink dispatcher and
+			// brings the window forward. Pre-Startup URLs (cold-start
+			// race window) get buffered on the App and drained when
+			// Startup wires up the Wails context.
+			OnUrlOpen: a.HandleOpenURL,
 		},
 	}
 
