@@ -45,58 +45,80 @@ async function holdFinalFrame(page: Page, ms = 800): Promise<void> {
 // from cmd/seedtest/main.go so the dashboard and the drawer tell the
 // same story.
 const HERO_TURNS: string[] = [
-  '\r\n' +
   '\x1b[32m>\x1b[0m What\'s open on the latency regression?\r\n' +
-  '\r\n' +
   '  \x1b[2m⏺ get_idea(slug=p99-latency-regression-in-search)\x1b[0m\r\n' +
-  '  \x1b[2m⎿ active · 1 backlog · 2 resources (Grafana, #search-incident)\x1b[0m\r\n' +
-  '\r\n',
+  '  \x1b[2m⎿ active · 1 backlog · 2 resources (Grafana, #search-incident)\x1b[0m\r\n',
 
-  '\x1b[32m>\x1b[0m Spin up a session on the OIDC migration too.\r\n' +
-  '\r\n' +
-  '  \x1b[2m⏺ goto_idea(slug=migrate-auth-service-to-oidc)  →  starts session\x1b[0m\r\n' +
-  '\r\n',
+  '\r\n\x1b[32m>\x1b[0m Spin up a session on the OIDC migration too.\r\n' +
+  '  \x1b[2m⏺ goto_idea(slug=migrate-auth-service-to-oidc)  →  starts session\x1b[0m\r\n',
 
-  '\x1b[32m>\x1b[0m Open a markdown review on the vector-DB notes.\r\n' +
-  '\r\n' +
+  '\r\n\x1b[32m>\x1b[0m Open a markdown review on the vector-DB notes.\r\n' +
   '  \x1b[2m⏺ request_markdown_review(slug=evaluate-vector-db,\x1b[0m\r\n' +
   '  \x1b[2m                          path="notes/bake-off.md")\x1b[0m\r\n' +
-  '\x1b[32m✓\x1b[0m delivered.\r\n' +
-  '\r\n',
+  '\x1b[32m✓\x1b[0m delivered.\r\n',
 
-  '\x1b[32m>\x1b[0m File a follow-up on the rate-limiter algorithm choice.\r\n' +
-  '\r\n' +
+  '\r\n\x1b[32m>\x1b[0m File a follow-up on the rate-limiter algorithm choice.\r\n' +
   '  \x1b[2m⏺ add_backlog_item_by_slug(slug=public-api-rate-limiting,\x1b[0m\r\n' +
   '  \x1b[2m                            title="Pick the algorithm: GCRA vs token bucket")\x1b[0m\r\n' +
   '\x1b[32m✓\x1b[0m queued.\r\n',
 ]
 
-// LATENCY_HERO_TURNS pre-populates the latency idea's testagent
-// session before the quick-switch demo navigates into it. Story arc:
-// triage open work → reproduce + bisect → file the finding. When the
-// user Cmd+K's into the session, the terminal mounts and vscreen
-// replays this content, so the GIF lands on a populated session
-// rather than an empty boot screen.
-const LATENCY_HERO_TURNS: string[] = [
-  '\r\n' +
-  '\x1b[32m>\x1b[0m Where are we on the p99 search latency regression?\r\n' +
-  '\r\n' +
-  '  \x1b[2m⏺ list_backlog(status=["open","in_progress"])\x1b[0m\r\n' +
-  '  \x1b[2m⎿ 1 open: "Bisect: which deploy introduced the regression?"\x1b[0m\r\n' +
-  '\r\n',
-
-  '\x1b[32m>\x1b[0m Diff between last green and first red deploy.\r\n' +
-  '\r\n' +
-  '  \x1b[2m⏺ Bash(git log --oneline search@a3f2c19..search@b4ee8a1)\x1b[0m\r\n' +
-  '  \x1b[2m⎿ b4ee8a1 search: switch ranker to BERT cross-encoder\x1b[0m\r\n' +
-  '  \x1b[2m⎿ 8c12d4f search: cache query embeddings (24h TTL)\x1b[0m\r\n' +
-  '\r\n',
-
-  '\x1b[32m>\x1b[0m The BERT swap looks suspicious. File the rollback step.\r\n' +
-  '\r\n' +
-  '  \x1b[2m⏺ add_backlog_item(title="Revert BERT cross-encoder; verify p99 in staging")\x1b[0m\r\n' +
-  '\x1b[32m✓\x1b[0m queued.\r\n',
+// Testagent slash commands that synthesize a believable session
+// transcript. Each command is a line submitted to testagent's stdin
+// (writeToSession + '\r'). The slash-command set comes from testagent
+// itself (/help shows the full list):
+//   /think <duration> <message>   thinking-spinner + echo
+//   /fake-tool <name> <json>      tool-use block + PreToolUse hook
+//   /fake-tool-result <text>      completes the tool + PostToolUse
+// Output flows through the PTY → vscreen → xterm replay, so content
+// persists across navigation (unlike term.write which only lives in
+// the currently-mounted xterm).
+//
+// LATENCY_TURNS: investigation story for the quick-switch destination.
+// Triage open work → reproduce + bisect → file the rollback.
+const LATENCY_TURNS: string[] = [
+  '/think 400ms Where are we on the p99 search latency regression?',
+  '/fake-tool list_backlog {"status":["open","in_progress"]}',
+  '/fake-tool-result 1 open: Bisect — which deploy introduced the regression?',
+  '/think 400ms Diff between last green and first red deploy.',
+  '/fake-tool Bash {"command":"git log --oneline search@a3f2c19..search@b4ee8a1"}',
+  '/fake-tool-result b4ee8a1 search: switch ranker to BERT cross-encoder',
+  '/think 400ms The BERT swap looks suspicious. File the rollback step.',
+  '/fake-tool add_backlog_item {"title":"Revert BERT cross-encoder; verify p99 in staging"}',
+  '/fake-tool-result queued',
 ]
+
+// ORCH_QUICK_TURNS: cross-idea orchestration in the orchestrator drawer
+// so quick-switch's dashboard doesn't show an empty drawer at recording
+// start. Two short turns are enough to fill the drawer without dragging
+// out the setup phase.
+const ORCH_QUICK_TURNS: string[] = [
+  '/think 400ms List ideas with running sessions.',
+  '/fake-tool list_ideas {"filter":"running"}',
+  '/fake-tool-result 2 running: p99-latency-regression-in-search, migrate-auth-service-to-oidc',
+  '/think 400ms Open a markdown review on the vector-DB notes.',
+  '/fake-tool request_markdown_review_by_slug {"slug":"evaluate-vector-db-for-semantic-search"}',
+  '/fake-tool-result delivered',
+]
+
+// populateSession submits each line + Enter to a testagent session.
+// testagent's slash commands emit PTY output that vscreen captures.
+//
+// Pacing matters: /think 400ms takes ~400ms; if the next command lands
+// during that window, testagent shows it as `queued: /next-cmd`, which
+// leaks the raw slash-command syntax into the demo. Wait 600ms between
+// commands so /think completes its spinner before the next write.
+async function populateSession(page: Page, uuid: string, turns: string[]): Promise<void> {
+  for (const line of turns) {
+    await page.evaluate(async ({ uuid, line }) => {
+      const W = window as unknown as { go: { app: { App: {
+        WriteToSession: (uuid: string, data: string) => Promise<void>;
+      } } } }
+      await W.go.app.App.WriteToSession(uuid, line + '\r')
+    }, { uuid, line })
+    await page.waitForTimeout(line.startsWith('/think') ? 600 : 250)
+  }
+}
 
 test.use({
   viewport: { width: 1200, height: 750 },
@@ -110,43 +132,55 @@ test.describe('Demos', () => {
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 })
 
     // Off-camera setup (visible in the recording as a static dashboard):
-    // start a fresh testagent session on the latency idea and write a
-    // few hero turns into its PTY. vscreen captures the output so when
-    // the user later Cmd+K's into the session, the terminal mounts and
-    // replays the populated transcript instead of an empty boot screen.
-    const latencyUUID = await page.evaluate(async () => {
+    // start an orchestrator session AND a latency-idea session, populate
+    // each via testagent slash commands. Slash-command output flows
+    // through the PTY into vscreen, so when the user Cmd+K's into the
+    // latency session, the terminal mounts and vscreen replays the
+    // populated transcript. The orchestrator session populates the
+    // pinned drawer at the top of the dashboard so it isn't empty
+    // during the initial GIF frames.
+    const { orchUUID, latencyUUID } = await page.evaluate(async () => {
       const W = window as unknown as { go: { app: { App: {
         ListIdeas: () => Promise<Array<{ name: string; slug: string }>>;
+        StartRootSession: (agent: string) => Promise<{ uuid: string }>;
         StartIdeaSession: (slug: string, agent: string, resume: boolean) => Promise<{ uuid: string }>;
       } } } }
       const ideas = await W.go.app.App.ListIdeas()
       const latency = ideas.find((i) => i.name === 'p99 latency regression in search')
       if (!latency) throw new Error('latency idea not seeded')
-      const res = await W.go.app.App.StartIdeaSession(latency.slug, 'testagent', false)
-      return res.uuid
+      const [orch, lat] = await Promise.all([
+        W.go.app.App.StartRootSession('testagent'),
+        W.go.app.App.StartIdeaSession(latency.slug, 'testagent', false),
+      ])
+      return { orchUUID: orch.uuid, latencyUUID: lat.uuid }
     })
 
-    // Wait for testagent to finish booting (MCP connected). Without
-    // this, WriteToSession bytes can race the agent's first render and
-    // get dropped through the kernel's line discipline.
-    await waitForAgentReady(page, latencyUUID)
+    // Wait for both testagents to finish booting (MCP connected).
+    // Without this, WriteToSession bytes race the agents' first render
+    // and get dropped through the kernel's line discipline.
+    await Promise.all([
+      waitForAgentReady(page, orchUUID),
+      waitForAgentReady(page, latencyUUID),
+    ])
 
-    // Populate the session terminal with latency-investigation turns.
-    for (const turn of LATENCY_HERO_TURNS) {
-      await page.evaluate(async ({ uuid, chunk }) => {
-        const W = window as unknown as { go: { app: { App: {
-          WriteToSession: (uuid: string, data: string) => Promise<void>;
-        } } } }
-        await W.go.app.App.WriteToSession(uuid, chunk)
-      }, { uuid: latencyUUID, chunk: turn })
-      // Brief between-turn pause so testagent processes each chunk
-      // before the next lands (matches the orchestrator-driving cadence).
-      await page.waitForTimeout(150)
-    }
+    // Populate both sessions in parallel. The orchestrator drawer
+    // displays the orch transcript at the top of the dashboard; the
+    // latency session is the quick-switch destination.
+    await Promise.all([
+      populateSession(page, orchUUID, ORCH_QUICK_TURNS),
+      populateSession(page, latencyUUID, LATENCY_TURNS),
+    ])
 
-    // Initial settle frame so the GIF starts on a stable dashboard
-    // AFTER the off-camera setup completes.
-    await page.waitForTimeout(600)
+    // Reload so the dashboard re-fetches and shows both sessions in
+    // their populated state (the cards' running-session indicators
+    // reflect the just-started sessions; the drawer mounts with the
+    // populated orchestrator transcript via vscreen replay).
+    await page.reload()
+    await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 })
+
+    // Settle frame so the GIF opens on a fully-loaded, populated
+    // dashboard before the user acts.
+    await page.waitForTimeout(700)
 
     // Open the command palette.
     await page.keyboard.press('Meta+k')
@@ -162,7 +196,26 @@ test.describe('Demos', () => {
     await page.keyboard.press('Enter')
 
     await expect(page).toHaveURL(/\/idea\/p99-latency-regression-in-search\/session\//, { timeout: 5000 })
-    await holdFinalFrame(page)
+    // Wait for the populated transcript to render in the new xterm
+    // before holding the final frame. Without this, the GIF can end
+    // on a still-blank terminal that hasn't finished vscreen replay.
+    await page.waitForFunction(
+      (uuid) => {
+        const reg = (window as unknown as Record<string, unknown>).__ideateTerminals as
+          Record<string, { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }>
+          | undefined
+        const term = reg?.[uuid]
+        if (!term) return false
+        const buf = term.buffer.active
+        for (let i = 0; i < buf.length; i++) {
+          if (buf.getLine(i)?.translateToString(true).includes('queued')) return true
+        }
+        return false
+      },
+      latencyUUID,
+      { timeout: 8000 },
+    )
+    await holdFinalFrame(page, 1200)
   })
 
   test('markdown-review', async ({ page }) => {
@@ -236,21 +289,22 @@ existing search infrastructure and avoids the dual-write footgun.
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 })
 
     // Start an idea session so the global session bar isn't empty and a
-    // root orchestrator session so the drawer is alive.
-    const searchSlug = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const ideas = (await window.go.app.App.ListIdeas()) as Array<{ name: string; slug: string }>
-      return ideas.find((i) => i.name === 'p99 latency regression in search')?.slug || ''
-    })
-    if (searchSlug) {
-      await page.evaluate(async (slug) => {
-        // @ts-expect-error wails binding
-        await window.go.app.App.StartIdeaSession(slug, 'testagent', false)
-      }, searchSlug)
-    }
+    // root orchestrator session so the drawer is alive. Both are
+    // best-effort: a prior test in this file may already have started
+    // sessions in the shared TEST_CONFIG, and the duplicate-start
+    // rejection is fine — we only need *some* session running.
     await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartRootSession('testagent')
+      const W = window as unknown as { go: { app: { App: {
+        ListIdeas: () => Promise<Array<{ name: string; slug: string }>>;
+        StartIdeaSession: (slug: string, agent: string, resume: boolean) => Promise<unknown>;
+        StartRootSession: (agent: string) => Promise<unknown>;
+      } } } }
+      const ideas = await W.go.app.App.ListIdeas()
+      const slug = ideas.find((i) => i.name === 'p99 latency regression in search')?.slug
+      if (slug) {
+        try { await W.go.app.App.StartIdeaSession(slug, 'testagent', false) } catch { /* already running */ }
+      }
+      try { await W.go.app.App.StartRootSession('testagent') } catch { /* already running */ }
     })
 
     await page.reload()
