@@ -139,7 +139,7 @@ test.describe('Demos', () => {
     // populated transcript. The orchestrator session populates the
     // pinned drawer at the top of the dashboard so it isn't empty
     // during the initial GIF frames.
-    const { orchUUID, latencyUUID } = await page.evaluate(async () => {
+    const { orchUUID, latencyUUID, latencySlug } = await page.evaluate(async () => {
       const W = window as unknown as { go: { app: { App: {
         ListIdeas: () => Promise<Array<{ name: string; slug: string }>>;
         StartRootSession: (agent: string) => Promise<{ uuid: string }>;
@@ -152,7 +152,7 @@ test.describe('Demos', () => {
         W.go.app.App.StartRootSession('testagent'),
         W.go.app.App.StartIdeaSession(latency.slug, 'testagent', false),
       ])
-      return { orchUUID: orch.uuid, latencyUUID: lat.uuid }
+      return { orchUUID: orch.uuid, latencyUUID: lat.uuid, latencySlug: latency.slug }
     })
 
     // Wait for both testagents to finish booting (MCP connected).
@@ -195,7 +195,9 @@ test.describe('Demos', () => {
     // the xterm mount replays the populated vscreen transcript.
     await page.keyboard.press('Enter')
 
-    await expect(page).toHaveURL(/\/idea\/p99-latency-regression-in-search\/session\//, { timeout: 5000 })
+    // CI seeds twice (dashboard.spec.ts then this spec) so the slug can
+    // be prefixed with the day's date for dedupe; match either form.
+    await expect(page).toHaveURL(new RegExp(`/idea/${latencySlug}/session/`), { timeout: 5000 })
     // Wait for the populated transcript to render in the new xterm
     // before holding the final frame. Without this, the GIF can end
     // on a still-blank terminal that hasn't finished vscreen replay.
