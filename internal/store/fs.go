@@ -642,6 +642,7 @@ func (s *FSStore) LinkRepo(ctx context.Context, slug, repoPath, branch, nameOver
 		return "", fmt.Errorf("repo path %q is not a directory", repoPath)
 	}
 
+	explicitName := nameOverride != ""
 	name := nameOverride
 	if name == "" {
 		origin, _ := repo.OriginURL(ctx, canonical)
@@ -651,9 +652,32 @@ func (s *FSStore) LinkRepo(ctx context.Context, slug, repoPath, branch, nameOver
 		return "", fmt.Errorf("could not derive a name for repo at %q", repoPath)
 	}
 
+	// Two-tier collision check:
+	//   - <idea>/repos/<name> — same idea linking the same canonical twice.
+	//   - <canonical>/.git/worktrees/<name> — different idea already linked this
+	//     canonical under the same leaf basename. Git keys worktree admin
+	//     entries by leaf, not full path, so cross-idea collisions land here.
+	// Auto-disambiguation only kicks in when the name was derived — explicit
+	// overrides are honored verbatim and refuse on collision.
 	worktreePath := filepath.Join(s.ideaDir(slug), reposDir, name)
-	if _, err := os.Stat(worktreePath); err == nil {
-		return "", fmt.Errorf("repo %q is already linked to idea %q", name, slug)
+	taken := func(candidate string) bool {
+		if _, err := os.Stat(filepath.Join(s.ideaDir(slug), reposDir, candidate)); err == nil {
+			return true
+		}
+		return repo.WorktreeAdminExists(canonical, candidate)
+	}
+	if taken(name) {
+		if explicitName {
+			return "", fmt.Errorf("repo %q is already linked", name)
+		}
+		// First retry: suffix with the idea slug. Then numeric tail (-2, -3, ...).
+		base := name
+		candidate := base + "-" + slug
+		for i := 2; taken(candidate); i++ {
+			candidate = fmt.Sprintf("%s-%s-%d", base, slug, i)
+		}
+		name = candidate
+		worktreePath = filepath.Join(s.ideaDir(slug), reposDir, name)
 	}
 
 	tracking := s.trackingBranchVal()

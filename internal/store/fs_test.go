@@ -610,7 +610,46 @@ func TestLinkRepoCollisionRefused(t *testing.T) {
 		t.Fatalf("first LinkRepo: %v", err)
 	}
 	if _, err := s.LinkRepo(ctx, idea.Slug, repoDir, "", "myrepo"); err == nil {
-		t.Errorf("second LinkRepo with same name should fail")
+		t.Errorf("second LinkRepo with same explicit name should fail")
+	}
+}
+
+// TestLinkRepoAutoDisambiguatesCrossIdea covers the case where two ideas
+// link the same canonical repo: the derived leaf basename collides on git's
+// process-wide worktree admin dir (`<canonical>/.git/worktrees/<name>`), so
+// the second link must auto-disambiguate to a unique name.
+func TestLinkRepoAutoDisambiguatesCrossIdea(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	ctx := context.Background()
+	s, _ := newTestStore(t)
+	repoDir := newTestGitRepo(t)
+
+	ideaA := &model.Idea{Name: "Idea A", Status: model.StatusActive}
+	ideaB := &model.Idea{Name: "Idea B", Status: model.StatusActive}
+	for _, i := range []*model.Idea{ideaA, ideaB} {
+		if err := s.Create(ctx, i); err != nil {
+			t.Fatalf("Create %s: %v", i.Name, err)
+		}
+	}
+
+	nameA, err := s.LinkRepo(ctx, ideaA.Slug, repoDir, "", "")
+	if err != nil {
+		t.Fatalf("LinkRepo on ideaA: %v", err)
+	}
+	nameB, err := s.LinkRepo(ctx, ideaB.Slug, repoDir, "", "")
+	if err != nil {
+		t.Fatalf("LinkRepo on ideaB (cross-idea auto-disambiguate path): %v", err)
+	}
+	if nameA == nameB {
+		t.Fatalf("expected disambiguated leaf names; got nameA=%q nameB=%q", nameA, nameB)
+	}
+	// First retry is slug-suffixed; verify the second idea picked it up.
+	if want := nameA + "-" + ideaB.Slug; nameB != want {
+		t.Errorf("nameB = %q, want %q", nameB, want)
 	}
 }
 
