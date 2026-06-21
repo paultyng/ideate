@@ -127,6 +127,26 @@ function ideaMRUScore(idea: model.Idea, runningUUID: string | undefined, mruScor
 // gracefully if anything ever competes.
 const PINNED_MRU = '￿' // U+FFFF — sorts after any normal-range char
 
+// focusOrchestratorHelper polls for the orchestrator terminal's
+// xterm-helper-textarea and calls .focus() once it appears. The drawer
+// + TerminalPanel mount conditionally on the drawer being visible
+// (PR #93 mount-on-visible), so the helper element does not exist at
+// the moment the command-palette unmount-microtask fires when the
+// drawer was closed. A bare setTimeout(0) misses; a rAF poll waits for
+// React to commit the drawer-open render then the TerminalPanel mount,
+// which together can span 2-3 frames in cold-mount paths. 10 frames
+// (~170ms at 60Hz) is the hard cap so a never-mounting host doesn't
+// pin a spin loop.
+const FOCUS_RETRY_FRAMES = 10
+function focusOrchestratorHelper(remaining = FOCUS_RETRY_FRAMES): void {
+  const term = document.querySelector<HTMLTextAreaElement>(
+    '.orchestrator-host .xterm-helper-textarea',
+  )
+  if (term) { term.focus(); return }
+  if (remaining <= 0) return
+  requestAnimationFrame(() => focusOrchestratorHelper(remaining - 1))
+}
+
 export default function CommandPalette({ open, onClose }: Props) {
   const navigate = useNavigate()
   const navigateToSession = useNavigateToIdeaSession()
@@ -199,17 +219,14 @@ export default function CommandPalette({ open, onClose }: Props) {
         // alongside their current route.
         if (!drawer.open) drawer.setOpen(true)
         onClose()
-        // Defer past the palette's unmount + any focus-restore
-        // microtask. The orchestrator terminal mounts once at App
-        // root (OrchestratorHost), so its helper textarea is
-        // present even if the drawer was closed — focus drops in
-        // cleanly without waiting for a render.
-        setTimeout(() => {
-          const term = document.querySelector<HTMLTextAreaElement>(
-            '.orchestrator-host .xterm-helper-textarea',
-          )
-          term?.focus()
-        }, 0)
+        // Off-home, OrchestratorHost mounts conditionally on the
+        // drawer being visible (PR #93 "mount-on-visible"), so the
+        // helper textarea may not exist when the palette's
+        // unmount-microtask fires. Poll rAF for the helper until it
+        // mounts; cap retries so a never-mounting scenario doesn't
+        // spin. ~10 frames at 60Hz is ~170ms — beyond user-perceptible
+        // for a focus drop without being a hard freeze on slow paint.
+        focusOrchestratorHelper()
       },
     }
     const dashboard: NavEntry = {
