@@ -2,6 +2,7 @@ import { test, expect, Page } from '@playwright/test'
 import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
+import { waitForAgentReady } from './ptyCapture'
 
 // Demo specs produce the README's animated GIFs. Each test name maps
 // 1:1 to a `docs/media/<name>.gif` output via `task generate:demos`,
@@ -60,7 +61,41 @@ const HERO_TURNS: string[] = [
   '\r\n' +
   '  \x1b[2m⏺ request_markdown_review(slug=evaluate-vector-db,\x1b[0m\r\n' +
   '  \x1b[2m                          path="notes/bake-off.md")\x1b[0m\r\n' +
-  '\x1b[32m✓\x1b[0m delivered.\r\n',
+  '\x1b[32m✓\x1b[0m delivered.\r\n' +
+  '\r\n',
+
+  '\x1b[32m>\x1b[0m File a follow-up on the rate-limiter algorithm choice.\r\n' +
+  '\r\n' +
+  '  \x1b[2m⏺ add_backlog_item_by_slug(slug=public-api-rate-limiting,\x1b[0m\r\n' +
+  '  \x1b[2m                            title="Pick the algorithm: GCRA vs token bucket")\x1b[0m\r\n' +
+  '\x1b[32m✓\x1b[0m queued.\r\n',
+]
+
+// LATENCY_HERO_TURNS pre-populates the latency idea's testagent
+// session before the quick-switch demo navigates into it. Story arc:
+// triage open work → reproduce + bisect → file the finding. When the
+// user Cmd+K's into the session, the terminal mounts and vscreen
+// replays this content, so the GIF lands on a populated session
+// rather than an empty boot screen.
+const LATENCY_HERO_TURNS: string[] = [
+  '\r\n' +
+  '\x1b[32m>\x1b[0m Where are we on the p99 search latency regression?\r\n' +
+  '\r\n' +
+  '  \x1b[2m⏺ list_backlog(status=["open","in_progress"])\x1b[0m\r\n' +
+  '  \x1b[2m⎿ 1 open: "Bisect: which deploy introduced the regression?"\x1b[0m\r\n' +
+  '\r\n',
+
+  '\x1b[32m>\x1b[0m Diff between last green and first red deploy.\r\n' +
+  '\r\n' +
+  '  \x1b[2m⏺ Bash(git log --oneline search@a3f2c19..search@b4ee8a1)\x1b[0m\r\n' +
+  '  \x1b[2m⎿ b4ee8a1 search: switch ranker to BERT cross-encoder\x1b[0m\r\n' +
+  '  \x1b[2m⎿ 8c12d4f search: cache query embeddings (24h TTL)\x1b[0m\r\n' +
+  '\r\n',
+
+  '\x1b[32m>\x1b[0m The BERT swap looks suspicious. File the rollback step.\r\n' +
+  '\r\n' +
+  '  \x1b[2m⏺ add_backlog_item(title="Revert BERT cross-encoder; verify p99 in staging")\x1b[0m\r\n' +
+  '\x1b[32m✓\x1b[0m queued.\r\n',
 ]
 
 test.use({
@@ -73,7 +108,44 @@ test.describe('Demos', () => {
     runSeedtest()
     await page.goto('/')
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 })
-    // Initial settle frame so the GIF starts on a stable dashboard.
+
+    // Off-camera setup (visible in the recording as a static dashboard):
+    // start a fresh testagent session on the latency idea and write a
+    // few hero turns into its PTY. vscreen captures the output so when
+    // the user later Cmd+K's into the session, the terminal mounts and
+    // replays the populated transcript instead of an empty boot screen.
+    const latencyUUID = await page.evaluate(async () => {
+      const W = window as unknown as { go: { app: { App: {
+        ListIdeas: () => Promise<Array<{ name: string; slug: string }>>;
+        StartIdeaSession: (slug: string, agent: string, resume: boolean) => Promise<{ uuid: string }>;
+      } } } }
+      const ideas = await W.go.app.App.ListIdeas()
+      const latency = ideas.find((i) => i.name === 'p99 latency regression in search')
+      if (!latency) throw new Error('latency idea not seeded')
+      const res = await W.go.app.App.StartIdeaSession(latency.slug, 'testagent', false)
+      return res.uuid
+    })
+
+    // Wait for testagent to finish booting (MCP connected). Without
+    // this, WriteToSession bytes can race the agent's first render and
+    // get dropped through the kernel's line discipline.
+    await waitForAgentReady(page, latencyUUID)
+
+    // Populate the session terminal with latency-investigation turns.
+    for (const turn of LATENCY_HERO_TURNS) {
+      await page.evaluate(async ({ uuid, chunk }) => {
+        const W = window as unknown as { go: { app: { App: {
+          WriteToSession: (uuid: string, data: string) => Promise<void>;
+        } } } }
+        await W.go.app.App.WriteToSession(uuid, chunk)
+      }, { uuid: latencyUUID, chunk: turn })
+      // Brief between-turn pause so testagent processes each chunk
+      // before the next lands (matches the orchestrator-driving cadence).
+      await page.waitForTimeout(150)
+    }
+
+    // Initial settle frame so the GIF starts on a stable dashboard
+    // AFTER the off-camera setup completes.
     await page.waitForTimeout(600)
 
     // Open the command palette.
@@ -84,14 +156,11 @@ test.describe('Demos', () => {
     await page.keyboard.type('latency', { delay: 90 })
     await page.waitForTimeout(400)
 
-    // Select the top match.
+    // Select the top match. sessionNav.resolveSessionTarget picks the
+    // running latency session we just set up and navigates straight in;
+    // the xterm mount replays the populated vscreen transcript.
     await page.keyboard.press('Enter')
 
-    // Confirm we navigated INTO the latency idea's session (not the
-    // idea-detail page). The seeded dormant session auto-resumes via
-    // useNavigateToIdeaSession → ResumeIdeaSession → /idea/<slug>/session/<uuid>.
-    // Without a seeded session the GIF would end on the metadata page,
-    // contradicting the actual quick-switch UX.
     await expect(page).toHaveURL(/\/idea\/p99-latency-regression-in-search\/session\//, { timeout: 5000 })
     await holdFinalFrame(page)
   })

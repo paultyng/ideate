@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/paultyng/ideate/internal/config"
 	"github.com/paultyng/ideate/internal/model"
@@ -57,20 +56,11 @@ func main() {
 				log.Fatalf("add backlog item to %q: %v", spec.Name, err)
 			}
 		}
-		for _, sess := range spec.Sessions {
-			if err := st.WriteSession(ctx, idea.Slug, sess.UUID, sess); err != nil {
-				log.Fatalf("write session for %q: %v", spec.Name, err)
-			}
-		}
-		fmt.Printf("seeded %s (%s, %d resources, %d backlog, %d sessions)\n",
-			idea.Slug, spec.Status, len(spec.Resources), len(spec.Backlog), len(spec.Sessions))
+		fmt.Printf("seeded %s (%s, %d resources, %d backlog)\n",
+			idea.Slug, spec.Status, len(spec.Resources), len(spec.Backlog))
 	}
 	fmt.Printf("\nseeded %d ideas into %s\n", len(manifest), ideasDir)
 }
-
-// pointerToTime returns a pointer to t. Used to populate optional
-// *time.Time fields on AgentSession from inline literals.
-func pointerToTime(t time.Time) *time.Time { return &t }
 
 // assertSafePath refuses unless the resolved path carries a recognized
 // test-sandbox marker segment: ".ideate-dev" (dogfood via `task dev`) or
@@ -97,10 +87,6 @@ type ideaSpec struct {
 	Status    model.Status
 	Resources []model.Resource
 	Backlog   []model.BacklogItem
-	// Sessions seeded onto the idea. Used by the quick-switch demo so
-	// pressing Enter on the latency idea lands in a session terminal
-	// (auto-resume flow) instead of the idea-detail metadata page.
-	Sessions []model.AgentSession
 }
 
 // manifest is the fixed set of demo ideas. Each one is shaped to
@@ -130,22 +116,6 @@ var manifest = []ideaSpec{
 		},
 		Backlog: []model.BacklogItem{
 			{Title: "Bisect: which deploy introduced the regression?", Body: "Symptom started ~2026-05-26 17:00 UTC. Last green deploy: search@a3f2c19. First red: search@b4ee8a1.", Status: model.BacklogStatusOpen},
-		},
-		// Dormant session so the quick-switch demo (pressing Enter on
-		// this idea in the command palette) lands in the session
-		// terminal via the auto-resume path — sessionNav.resolveSessionTarget
-		// picks the dormant and ResumeIdeaSession boots it. Ended an
-		// hour ago so it's distinguishably "dormant" but not stale.
-		Sessions: []model.AgentSession{
-			{
-				UUID:       "10000000-0000-4000-8000-000000000001",
-				Agent:      "testagent",
-				Status:     model.SessionStatusDormant,
-				StopReason: model.SessionStopReasonShutdown,
-				Started:    time.Now().Add(-2 * time.Hour),
-				Ended:      pointerToTime(time.Now().Add(-1 * time.Hour)),
-				WorkingDir: "",
-			},
 		},
 	},
 	{

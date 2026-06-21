@@ -357,9 +357,14 @@ tasks:
         cleanup() {
           local pid
           for pid in $(find_dev_pids); do
+            echo "cleanup: killing dev pid $pid"
             kill_tree "$pid"
           done
         }
+        # Trap covers error paths (set -e early-exit, signals).
+        # The end-of-script also calls cleanup explicitly — empirically,
+        # `task: <subtask>` invocation boundaries can prevent the trap
+        # from firing reliably; the explicit call is the load-bearing one.
         trap cleanup EXIT
 
         # Pre-launch cleanup: kill any stale process from a crashed
@@ -400,6 +405,10 @@ tasks:
         RESULT=$?
         echo ""
         echo "E2E log: $LOG_FILE"
+        # Explicit cleanup before exit. Task's subtask boundaries can
+        # prevent the EXIT trap from firing reliably; this is the
+        # actual termination point for the dev tree.
+        cleanup
         exit $RESULT
 
   generate:screenshots:
