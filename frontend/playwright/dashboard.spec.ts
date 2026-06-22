@@ -633,54 +633,44 @@ test.describe('Dashboard', () => {
     await assertBarOrder(page, [yName, xName])
   })
 
-  // The +N pill counts sessions NOT pinned in the chip slot. On the
-  // dashboard there's no current session, so 3 running sessions all
-  // sit in the popover; the pill reads `+3`. Click +N → popover
-  // lists the sessions newest-first; click an entry → navigate.
-  test('overflow popover opens upward and lets you select a session', async ({ page }) => {
+  // The overflow pill shows per-idea collapsed counts ("N active" or
+  // "N active (M dormant)"). Clicking it opens the Cmd+K palette rather
+  // than an inline popover.
+  test('overflow pill shows idea counts and click opens command palette', async ({ page }) => {
     test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
 
     await page.goto('/')
-    // Asserts an exact `+3` overflow count, so prior tests' leaked
-    // running sessions would inflate it (seen as `+6` / `+9`).
+    // Clean slate so the count is deterministic.
     await stopAllRunningSessions(page)
 
     const names: string[] = []
-    const results: { slug: string; uuid: string }[] = []
     for (let i = 0; i < 3; i++) {
       const name = `Overflow ${i} ${Date.now()}`
       names.push(name)
-      const r = await page.evaluate(async (n) => {
+      await page.evaluate(async (n) => {
         // @ts-expect-error wails binding
         const slug = (await window.go.app.App.CreateIdea(n, 'active', '')) as string
         // @ts-expect-error wails binding
-        const result = (await window.go.app.App.StartIdeaSession(slug, 'testagent', false)) as { uuid: string }
-        return { slug, uuid: result.uuid }
+        await window.go.app.App.StartIdeaSession(slug, 'testagent', false)
       }, name)
-      results.push(r)
     }
 
     const overflowBtn = page.locator('.global-session-more')
     await expect(overflowBtn).toBeVisible({ timeout: 10000 })
-    await expect(overflowBtn).toContainText('+3')
+    // Each idea has one session → 3 active ideas.
+    await expect(overflowBtn).toContainText('3 active')
 
+    // Clicking the pill opens the command palette instead of a popover.
     await overflowBtn.click()
-    const popover = page.locator('.global-session-popover')
-    await expect(popover).toBeVisible()
-
-    // Pick the first-created session — oldest by recency, popover-bottom.
-    // Popover renders SessionCard (not the bare chip) so the user sees
-    // the idea name, summary, agent, and activity.
-    const targetCard = popover.locator('.session-card', { hasText: names[0] })
-    await expect(targetCard).toBeVisible()
-    await targetCard.click()
-    await expect(page).toHaveURL(new RegExp(`/idea/${results[0].slug}/session/${results[0].uuid}`))
+    await expect(page.locator('[data-testid="command-palette"]')).toBeVisible({ timeout: 2000 })
+    // No inline popover should appear.
+    await expect(page.locator('.global-session-popover')).toHaveCount(0)
   })
 
-  // The +N pill picks up an `.attention` class when an attention-
-  // needed (waiting/reviewing) session is in the popover but NOT the
-  // currently-pinned chip. On the dashboard nothing is pinned, so a
-  // single waiting session is enough to trigger the glow.
+  // The overflow pill picks up an `.attention` class when an attention-
+  // needed (waiting/reviewing) session exists outside the current chip.
+  // On the dashboard nothing is pinned, so a single waiting session
+  // is enough to trigger the glow.
   test('overflow pill glows when a popover session needs attention', async ({ page }) => {
     test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
 

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation, matchPath } from 'react-router-dom'
 import SessionStatusIcon from './SessionStatusIcon'
 import IdeaStatusIcon from './IdeaStatusIcon'
-import CardShell from './CardShell'
 import { useMRU } from '../contexts/MRUContext'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 
@@ -19,8 +18,6 @@ interface ActiveSession {
   // via TouchIdea, so it doubles as the session's last-activity signal.
   updated: string
   // Parent idea's summary sidecar (one-sentence intent line) when present.
-  // Embedded by ListActiveSessions so the overflow popover can render
-  // dashboard-style cards without a second fan-out fetch.
   ideaSummary?: { line: string }
 }
 
@@ -33,7 +30,7 @@ function agentLabel(agentType: string): string {
 
 // Activities that mean "agent is paused, user input needed" — waiting on a
 // permission/Notification hook, or blocked on a review tool result. Drives
-// the +N glow when one of these is hidden in the overflow.
+// the overflow pill's attention glow.
 function isAttentionNeeded(activity: string): boolean {
   return activity === 'waiting' || activity === 'reviewing'
 }
@@ -49,12 +46,10 @@ function sessionRecency(s: ActiveSession, mruScore: (uuid: string) => string): s
   return candidates.reduce((a, b) => (a > b ? a : b))
 }
 
-// Pure recency sort, newest first. The popover and dashboard share this
+// Pure recency sort, newest first. The bar and dashboard share this
 // rule so the user sees the same ordering across surfaces (the
 // dashboard's IdeaList already sorts by idea.updated, which is the
-// same signal). The activity tier that used to lead recency is gone;
-// the +N's attention-glow surfaces the waiting/reviewing signal
-// without reordering the list.
+// same signal).
 function sortSessions(sessions: ActiveSession[], mruScore: (uuid: string) => string): ActiveSession[] {
   return [...sessions].sort((a, b) =>
     sessionRecency(b, mruScore).localeCompare(sessionRecency(a, mruScore)),
@@ -62,10 +57,7 @@ function sortSessions(sessions: ActiveSession[], mruScore: (uuid: string) => str
 }
 
 // The tabs zone reserves exactly one slot for the currently-viewed
-// session. On non-session routes the slot is empty; the popover is
-// the entire list. The popover ALWAYS shows every running session
-// (including the one currently in the chip) so the user can see the
-// full picture without mentally diff-ing chip vs popover.
+// session. On non-session routes the slot is empty.
 function partition(
   sessions: ActiveSession[],
   currentUUID: string,
@@ -111,57 +103,13 @@ function Chip({ session, onActivate, isCurrent }: ChipProps) {
   )
 }
 
-interface PopoverCardProps {
-  session: ActiveSession
-  onActivate: () => void
-  isCurrent?: boolean
-}
-
-// SessionCard renders a session in the overflow popover with the same
-// visual language as the dashboard's idea cards. Composes CardShell
-// so visual changes flow through one source of truth.
-function SessionCard({ session, onActivate, isCurrent }: PopoverCardProps) {
-  const cls = ['session-card', session.activity]
-  if (isCurrent) cls.push('current')
-  const summaryLine = session.ideaSummary?.line?.trim() || undefined
-  const header = (
-    <div className="session-card-title">
-      <IdeaStatusIcon status={session.ideaStatus} size={14} />
-      <span className="session-card-name">{session.ideaName}</span>
-    </div>
-  )
-  const meta = (
-    <>
-      <SessionStatusIcon status="running" activity={session.activity} />
-      <span className="session-card-agent">{agentLabel(session.agentType)}</span>
-      {isCurrent && <span className="session-card-current-tag">current</span>}
-    </>
-  )
-  return (
-    <CardShell
-      className={cls.join(' ')}
-      header={header}
-      summary={summaryLine}
-      meta={meta}
-      onActivate={onActivate}
-      ariaLabel={`${session.ideaName} — ${agentLabel(session.agentType)}`}
-    />
-  )
-}
-
 // GlobalSessionBar renders the footer's tabs zone: the current
-// session pinned rightmost, newer non-current chips next to it,
-// older non-current chips leftward of those, and any overflow
-// (everything past MAX_VISIBLE) collapsed into an upward-expanding
-// `+N` stack on the left edge. Attention-needed (waiting/reviewing)
-// sessions are no longer force-visible; the +N glows when one is
-// hidden so the user still sees the signal.
+// session pinned rightmost, and an overflow button on the left that
+// opens the Cmd+K command palette when clicked.
 export default function GlobalSessionBar() {
   const navigate = useNavigate()
   const location = useLocation()
   const [sessions, setSessions] = useState<ActiveSession[]>([])
-  const [overflowOpen, setOverflowOpen] = useState(false)
-  const overflowRef = useRef<HTMLDivElement | null>(null)
   // MRU context: the Cmd+K palette consumes the same per-UUID
   // "last focused" timestamps so the two surfaces stay in sync.
   // mruScore is read synchronously during render; markFocused fires
@@ -197,18 +145,6 @@ export default function GlobalSessionBar() {
     }
   }, [])
 
-  // Click outside to close the overflow popover.
-  useEffect(() => {
-    if (!overflowOpen) return
-    const onClick = (e: MouseEvent) => {
-      if (!overflowRef.current?.contains(e.target as Node)) {
-        setOverflowOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [overflowOpen])
-
   // Detect whether the user is currently viewing a session — pin that
   // session's chip leftmost in the visible row. HashRouter's useLocation
   // returns the in-hash path, so location.pathname is /idea/.../session/...
@@ -241,64 +177,69 @@ export default function GlobalSessionBar() {
 
   const { visible, hidden } = partition(sessions, partitionCurrentUUID, mruScore)
 
-  // Sessions that are NOT also pinned as the current visible chip. The
-  // +N button only earns its place when it would surface something the
-  // user can't already see — otherwise it'd just point at the chip
-  // next to it. The popover content itself is still `hidden` (i.e. all
-  // sessions, for completeness).
-  const extraInPopover = hidden.filter((s) => s.uuid !== partitionCurrentUUID)
-
-  // Test affordance: expose the popover's idea-name list in render
-  // order (top-to-bottom, newest-first). Tests assert against this so
-  // they don't have to click the popover open and race its DOM mount.
+  // Test affordance: expose the bar's idea-name list in render order
+  // (top-to-bottom, newest-first). Tests assert against this so they
+  // don't have to open the palette and race its DOM mount.
   if (typeof window !== 'undefined') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(window as any).__ideateBarOrder = hidden.map((s) => s.ideaName)
   }
-  // Glow class when an attention-needed session is hidden — i.e. one
-  // the user can't see in the chip. The current session's own state
-  // is already conveyed by its chip's activity styling, so exclude it
-  // from the glow calculation.
-  const extraAttention = extraInPopover.some((s) => isAttentionNeeded(s.activity))
+
+  // Per-idea collapsed counts. An idea is "active" if at least one of
+  // its sessions has activity !== 'dormant'; it's "dormant" only if ALL
+  // its sessions are dormant (so an idea with both running + dormant
+  // sessions counts once as active, never double-counted).
+  const slugGroups = new Map<string, ActiveSession[]>()
+  for (const s of sessions) {
+    const group = slugGroups.get(s.slug) ?? []
+    group.push(s)
+    slugGroups.set(s.slug, group)
+  }
+  let activeIdeas = 0
+  let dormantIdeas = 0
+  for (const group of slugGroups.values()) {
+    const allDormant = group.every((s) => s.activity === 'dormant')
+    if (allDormant) {
+      dormantIdeas++
+    } else {
+      activeIdeas++
+    }
+  }
+
+  // Glow class when an attention-needed session exists outside the
+  // current chip. Drives the pill's colour so the signal isn't lost.
+  const extraInOverflow = hidden.filter((s) => s.uuid !== partitionCurrentUUID)
+  const extraAttention = extraInOverflow.some((s) => isAttentionNeeded(s.activity))
   const extraDominant = extraAttention
-    ? extraInPopover.find((s) => s.activity === 'waiting')?.activity || 'reviewing'
-    : extraInPopover.some((s) => s.activity === 'active') ? 'active' : 'idle'
+    ? extraInOverflow.find((s) => s.activity === 'waiting')?.activity || 'reviewing'
+    : extraInOverflow.some((s) => s.activity === 'active') ? 'active' : 'idle'
+
+  // Build the overflow pill label.
+  let overflowLabel: string | null = null
+  if (activeIdeas > 0 && dormantIdeas > 0) {
+    overflowLabel = `${activeIdeas} active (${dormantIdeas} dormant)`
+  } else if (activeIdeas > 0) {
+    overflowLabel = `${activeIdeas} active`
+  } else if (dormantIdeas > 0) {
+    overflowLabel = `${dormantIdeas} dormant`
+  }
 
   const chipPath = (s: ActiveSession): string => `/idea/${s.slug}/session/${s.uuid}`
   const goTo = (s: ActiveSession) => () => navigate(chipPath(s))
 
   return (
     <div className="global-session-bar">
-      {extraInPopover.length > 0 && (
-        <div
-          className={`global-session-overflow${extraAttention ? ' attention' : ''}`}
-          ref={overflowRef}
-        >
+      {overflowLabel !== null && (
+        <div className={`global-session-overflow${extraAttention ? ' attention' : ''}`}>
           <button
             type="button"
             className="global-session-more"
-            aria-label={`Show ${extraInPopover.length} other running session${extraInPopover.length === 1 ? '' : 's'}`}
-            aria-expanded={overflowOpen}
-            onClick={() => setOverflowOpen((o) => !o)}
+            aria-label="Open command palette"
+            onClick={() => window.dispatchEvent(new CustomEvent('ideate:cmdk-open'))}
           >
             <SessionStatusIcon status="running" activity={extraDominant} />
-            +{extraInPopover.length}
+            {overflowLabel}
           </button>
-          {overflowOpen && (
-            <div className="global-session-popover" role="menu">
-              {hidden.map((s) => (
-                <SessionCard
-                  key={s.uuid}
-                  session={s}
-                  isCurrent={isCurrent(s)}
-                  onActivate={() => {
-                    setOverflowOpen(false)
-                    navigate(chipPath(s))
-                  }}
-                />
-              ))}
-            </div>
-          )}
         </div>
       )}
       {visible.map((s) => (
