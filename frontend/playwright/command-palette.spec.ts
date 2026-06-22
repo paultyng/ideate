@@ -100,6 +100,27 @@ test.describe('Command palette', () => {
     await expect(page.locator('.idea-detail-name')).toHaveText(target)
   })
 
+  // Tokenized fuzzy: a multi-word query matches when every word is a
+  // subsequence of the label, regardless of which word comes first. So
+  // "palette target" and "target palette" both surface the same idea.
+  test('whitespace-separated tokens match in any order', async ({ page }) => {
+    const target = `Palette Target ${Date.now()}`
+    const noise = `Other Different ${Date.now()}`
+    await createIdea(page, noise)
+    await createIdea(page, target)
+
+    await page.goto('/')
+
+    for (const query of ['palette target', 'target palette']) {
+      await openPalette(page)
+      await page.locator('.command-palette-input').fill(query)
+      const rows = page.locator('.command-palette-list .session-card')
+      await expect(rows.first(), `query="${query}" should rank ${target} first`).toContainText(target)
+      await page.locator('body').press('Escape')
+      await expect(page.locator('[data-testid="command-palette"]')).toHaveCount(0)
+    }
+  })
+
   test('empty query lists ideas in MRU order', async ({ page }) => {
     // Visit A then B. With nothing typed, the palette should list
     // B above A (most recently focused) — both below the pinned

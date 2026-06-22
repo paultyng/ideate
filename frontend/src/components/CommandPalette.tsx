@@ -70,29 +70,51 @@ interface Props {
   onClose: () => void
 }
 
-// Subsequence fuzzy match. Returns a score (higher = better) or
-// -Infinity for no match. Used for the typing path; the empty-query
-// path doesn't call it.
-function fuzzyScore(query: string, hay: string): number {
-  if (!query) return 0
-  const q = query.toLowerCase()
-  const h = hay.toLowerCase()
+// subseqScore scores a single contiguous token as a subsequence of hay.
+// Returns -Infinity when the token can't be found at all so callers can
+// gate on "all tokens matched". The streak + early-match bonuses match
+// fzf-style heuristics: contiguous runs and matches near the head of
+// the haystack are amplified.
+function subseqScore(token: string, hay: string): number {
+  if (!token) return 0
   let hi = 0
-  let qi = 0
+  let ti = 0
   let score = 0
   let streak = 0
-  while (qi < q.length && hi < h.length) {
-    if (q[qi] === h[hi]) {
+  while (ti < token.length && hi < hay.length) {
+    if (token[ti] === hay[hi]) {
       streak += 1
       score += 10 + streak * 4 + Math.max(0, 50 - hi)
-      qi += 1
+      ti += 1
     } else {
       streak = 0
     }
     hi += 1
   }
-  if (qi < q.length) return -Infinity
+  if (ti < token.length) return -Infinity
   return score
+}
+
+// fuzzyScore splits the query on whitespace and requires EVERY token
+// to subsequence-match the haystack — but the tokens themselves may
+// appear in any order. So "app ideate" and "ideate app" both rank the
+// idea "Ideate app" the same way. A query without whitespace behaves
+// exactly as the single-subseq matcher did before this change.
+//
+// Order-independence matters because users type the words they
+// remember, not the words in the order the label happens to use.
+function fuzzyScore(query: string, hay: string): number {
+  if (!query) return 0
+  const h = hay.toLowerCase()
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return 0
+  let total = 0
+  for (const tok of tokens) {
+    const s = subseqScore(tok, h)
+    if (s === -Infinity) return -Infinity
+    total += s
+  }
+  return total
 }
 
 // Penalty subtracted from alias matches so a label hit wins ties —
