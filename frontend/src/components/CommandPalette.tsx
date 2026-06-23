@@ -137,14 +137,34 @@ const PINNED_MRU = '￿' // U+FFFF — sorts after any normal-range char
 // which together can span 2-3 frames in cold-mount paths. 10 frames
 // (~170ms at 60Hz) is the hard cap so a never-mounting host doesn't
 // pin a spin loop.
+//
+// focusGeneration is a module-level token: each new invocation
+// increments it; in-flight rAF callbacks bail when their generation no
+// longer matches. Without this guard, a poll started for "pick
+// Orchestrator" would still fire if the user reopened the palette and
+// picked something else — silently stealing focus into the
+// orchestrator after the host eventually mounts. cancelOrchestratorFocus
+// also increments the generation so the palette's open/close hook can
+// invalidate any pending poll on transition.
 const FOCUS_RETRY_FRAMES = 10
-function focusOrchestratorHelper(remaining = FOCUS_RETRY_FRAMES): void {
-  const term = document.querySelector<HTMLTextAreaElement>(
-    '.orchestrator-host .xterm-helper-textarea',
-  )
-  if (term) { term.focus(); return }
-  if (remaining <= 0) return
-  requestAnimationFrame(() => focusOrchestratorHelper(remaining - 1))
+let focusGeneration = 0
+
+function focusOrchestratorHelper(): void {
+  const myGen = ++focusGeneration
+  const step = (remaining: number) => {
+    if (myGen !== focusGeneration) return
+    const term = document.querySelector<HTMLTextAreaElement>(
+      '.orchestrator-host .xterm-helper-textarea',
+    )
+    if (term) { term.focus(); return }
+    if (remaining <= 0) return
+    requestAnimationFrame(() => step(remaining - 1))
+  }
+  step(FOCUS_RETRY_FRAMES)
+}
+
+function cancelOrchestratorFocus(): void {
+  focusGeneration++
 }
 
 export default function CommandPalette({ open, onClose }: Props) {
@@ -166,6 +186,11 @@ export default function CommandPalette({ open, onClose }: Props) {
   const drawer = useOrchestratorDrawer()
 
   useEffect(() => {
+    // Any palette transition cancels a pending orchestrator-focus poll
+    // from a prior open. Without this, "pick Orchestrator, Esc, reopen,
+    // pick Dashboard" could still steal focus into the orchestrator
+    // when its host mounts a few frames later.
+    cancelOrchestratorFocus()
     if (!open) {
       const prev = restoreFocusRef.current
       restoreFocusRef.current = null
