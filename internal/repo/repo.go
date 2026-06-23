@@ -119,6 +119,26 @@ func AddWorktree(_ context.Context, canonical, worktreePath, branch string) erro
 	return nil
 }
 
+// WorktreeAdminExists reports whether canonical has a registered worktree
+// admin entry under the given leaf name. Two ideas linking the same
+// canonical clone would otherwise collide on `<canonical>/.git/worktrees/<name>`
+// (or `<canonical>/worktrees/<name>` for a bare canonical), since git keys
+// worktree admin entries by leaf basename, not by full path.
+func WorktreeAdminExists(canonical, name string) bool {
+	if canonical == "" || name == "" {
+		return false
+	}
+	for _, candidate := range []string{
+		filepath.Join(canonical, ".git", "worktrees", name),
+		filepath.Join(canonical, "worktrees", name),
+	} {
+		if _, err := os.Stat(candidate); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // SetUpstream configures upstreamRef as the upstream of branch inside the
 // worktree at worktreePath. Returns (false, nil) if upstreamRef doesn't
 // resolve in the repo — the caller decides whether to log/skip; the
