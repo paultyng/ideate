@@ -49,21 +49,25 @@ func (m *Manager) handleNotifyUser(sessionID string) server.ToolHandlerFunc {
 		if title == "" || body == "" {
 			return mcp.NewToolResultError("title and body are required"), nil
 		}
-		if !m.allowNotify(sessionID) {
+		if !m.checkNotifyRate(sessionID) {
 			return mcp.NewToolResultError(errNotifyRateLimited.Error()), nil
 		}
 		if err := m.notify(title, body); err != nil {
+			// Roll back the rate-limit slot — a failed osascript shouldn't
+			// burn the user's quota for 5s when no notification was delivered.
+			m.clearNotifyRate(sessionID)
 			return mcp.NewToolResultError(fmt.Sprintf("notify_user: %v", err)), nil
 		}
 		return mcp.NewToolResultText("ok"), nil
 	}
 }
 
-// allowNotify enforces the per-session rate limit. Returns true and updates
-// the timestamp on allow; returns false on deny without updating (so the next
-// allowed call's window starts from the last successful emit, not from the
-// last attempt — a hammering agent doesn't push its own quota forward).
-func (m *Manager) allowNotify(sessionID string) bool {
+// checkNotifyRate enforces the per-session rate limit. Returns true and
+// records the timestamp on allow; returns false on deny without updating (so
+// the next allowed call's window starts from the last successful emit, not
+// from the last attempt — a hammering agent doesn't push its own quota
+// forward).
+func (m *Manager) checkNotifyRate(sessionID string) bool {
 	now := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -75,6 +79,15 @@ func (m *Manager) allowNotify(sessionID string) bool {
 	}
 	m.lastNotify[sessionID] = now
 	return true
+}
+
+// clearNotifyRate rolls back a session's rate-limit slot. Used when the
+// notify dispatch failed (e.g. osascript missing) so the user isn't held
+// to a 5s cooldown for a delivery that never landed.
+func (m *Manager) clearNotifyRate(sessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.lastNotify, sessionID)
 }
 
 // notify dispatches the notification to the OS. Indirected through a field
@@ -106,10 +119,14 @@ func defaultNotifier(title, body string) error {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
-	// AppleScript quoting: backslash-escape backslashes then double quotes.
-	// Title/body are otherwise plain — newlines are accepted by `display
-	// notification` and rendered as space.
+	// AppleScript quoting. In an osascript -e statement, an unescaped
+	// newline ends the current statement and starts a new one — a payload
+	// like `body\ndisplay dialog "x"` would execute a second statement. So
+	// scrub newlines first, then backslash-escape backslashes and double
+	// quotes. Carriage returns get the same treatment for the same reason.
 	esc := func(s string) string {
+		s = strings.ReplaceAll(s, "\r", " ")
+		s = strings.ReplaceAll(s, "\n", " ")
 		s = strings.ReplaceAll(s, `\`, `\\`)
 		s = strings.ReplaceAll(s, `"`, `\"`)
 		return s

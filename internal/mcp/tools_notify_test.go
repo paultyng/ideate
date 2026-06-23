@@ -163,3 +163,28 @@ func TestNotifyUser_NotifierError(t *testing.T) {
 		t.Errorf("error text = %q, want substring %q", got, want.Error())
 	}
 }
+
+// TestNotifyUser_FailureDoesNotBurnQuota guards the rollback: a failed
+// notify() call must clear the session's rate-limit slot so the user can
+// retry immediately rather than waiting out a 5s cooldown for a delivery
+// that never reached the OS.
+func TestNotifyUser_FailureDoesNotBurnQuota(t *testing.T) {
+	t.Parallel()
+	fake := &fakeNotifier{err: errors.New("transient osascript hiccup")}
+	m := newNotifyManager(t, fake.call)
+
+	first := callNotify(t, m, "ses-retry", "T", "B")
+	if !first.IsError {
+		t.Fatalf("first call should have errored from fake notifier")
+	}
+
+	// Recover the notifier and retry — should not be rate-limited.
+	fake.err = nil
+	second := callNotify(t, m, "ses-retry", "T", "B")
+	if second.IsError {
+		t.Fatalf("retry after failed notify should succeed, got error: %s", resultText(t, second))
+	}
+	if got := resultText(t, second); got != "ok" {
+		t.Errorf("text = %q, want %q", got, "ok")
+	}
+}
