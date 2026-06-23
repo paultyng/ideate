@@ -212,6 +212,11 @@ export default function App() {
   useDisableWebviewNav()
   const [paletteOpen, setPaletteOpen] = useState(false)
   useCmdK(setPaletteOpen)
+  useEffect(() => {
+    const onOpen = () => setPaletteOpen(true)
+    window.addEventListener('ideate:cmdk-open', onOpen)
+    return () => window.removeEventListener('ideate:cmdk-open', onOpen)
+  }, [])
   const location = useLocation()
   // The dashboard (home) pins the orchestrator drawer open: ideation
   // starts there, the orchestrator tools are the primary creation
