@@ -176,6 +176,41 @@ test.describe('Command palette', () => {
     await expect(page.locator('[data-testid="orchestrator-drawer"]')).toBeVisible({ timeout: 2000 })
   })
 
+  // Regression: after PR #93 mount-on-visible, picking Orchestrator from the
+  // palette dropped the drawer but the user had to click into the terminal
+  // before keystrokes registered — the helper textarea didn't exist when
+  // the palette's unmount-microtask fired, so the focus() call missed.
+  // The fix polls rAF for the helper to mount before focusing.
+  test('selecting Orchestrator focuses the terminal helper textarea', async ({ page }) => {
+    await page.goto('/')
+    // OrchestratorHost only mounts when a root session exists.
+    await page.evaluate(async () => {
+      // @ts-expect-error wails binding
+      await window.go.app.App.StartRootSession('testagent')
+    })
+    // Navigate off-dashboard so the drawer goes from closed → opened
+    // via the palette path (on / the drawer is pinned and the test
+    // doesn't exercise the mount-on-visible race).
+    await page.goto('/#/idea/new')
+    await expect(page.locator('[data-testid="orchestrator-drawer"]')).toHaveCount(0)
+
+    await openPalette(page)
+    await page.keyboard.press('Enter')
+
+    // Drawer appears.
+    await expect(page.locator('[data-testid="orchestrator-drawer"]')).toBeVisible({ timeout: 2000 })
+
+    // After mount + focus-transfer, document.activeElement is the helper
+    // textarea inside the orchestrator host. Poll briefly — focus lands
+    // within ~10 rAF frames per the fix's bounded retry.
+    await expect.poll(async () => await page.evaluate(() => {
+      const helper = document.querySelector<HTMLTextAreaElement>(
+        '.orchestrator-host .xterm-helper-textarea',
+      )
+      return document.activeElement === helper
+    }), { timeout: 2000 }).toBe(true)
+  })
+
   // Dashboard pin navigates to / (the existing browse surface).
   test('selecting Dashboard navigates to /', async ({ page }) => {
     await createIdea(page, `Palette Dash ${Date.now()}`)
