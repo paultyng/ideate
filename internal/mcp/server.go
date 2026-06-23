@@ -175,6 +175,14 @@ type Manager struct {
 	// by App.Startup via SetSessionStarter; nil in tests that don't
 	// care about the tool.
 	starter SessionStarter
+
+	// notifier sends OS notifications for the notify_user tool. Nil
+	// uses the platform default (osascript on macOS, log-only
+	// elsewhere). Tests stub via SetNotifier. Guarded by mu.
+	notifier func(title, body string) error
+	// lastNotify carries per-session last-emit timestamps for the
+	// notify_user rate limiter. Guarded by mu.
+	lastNotify map[string]time.Time
 }
 
 // NewManager creates a new MCP manager. events may be nil — emits
@@ -353,6 +361,7 @@ func (m *Manager) addTools(s *server.MCPServer, sessionID string) {
 	s.AddTool(archiveIdeaTool(), m.handleArchiveIdea(sessionID))
 	s.AddTool(pauseIdeaTool(), m.handlePauseIdea(sessionID))
 	s.AddTool(resumeIdeaTool(), m.handleResumeIdea(sessionID))
+	s.AddTool(notifyUserTool(), m.handleNotifyUser(sessionID))
 	m.addCrossIdeaTools(s, sessionID)
 }
 
@@ -385,6 +394,8 @@ func (m *Manager) addRootTools(s *server.MCPServer, sessionID string) {
 	s.AddTool(unarchiveIdeaTool(), m.handleUnarchiveIdea(sessionID))
 	s.AddTool(pauseIdeaTool(), m.handlePauseIdea(sessionID))
 	s.AddTool(resumeIdeaTool(), m.handleResumeIdea(sessionID))
+
+	s.AddTool(notifyUserTool(), m.handleNotifyUser(sessionID))
 }
 
 // addCrossIdeaTools registers the slug-based idea/resource management
