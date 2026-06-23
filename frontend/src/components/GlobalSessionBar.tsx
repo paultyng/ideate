@@ -185,12 +185,20 @@ export default function GlobalSessionBar() {
     ;(window as any).__ideateBarOrder = hidden.map((s) => s.ideaName)
   }
 
-  // Per-idea collapsed counts. An idea is "active" if at least one of
-  // its sessions has activity !== 'dormant'; it's "dormant" only if ALL
-  // its sessions are dormant (so an idea with both running + dormant
-  // sessions counts once as active, never double-counted).
+  // Per-idea collapsed counts of work NOT already represented by the
+  // visible chip. Excluding the current chip's idea is what makes the
+  // pill mean "there is more to switch to" — without that filter the
+  // user viewing their only session would see "1 active" with nothing
+  // else to surface.
+  //
+  // An idea is "active" if at least one of its sessions has
+  // activity !== 'dormant'; it's "dormant" only if ALL its sessions
+  // are dormant (so an idea with both running + dormant sessions
+  // counts once as active, never double-counted).
+  const currentSlug = visible[0]?.slug ?? ''
   const slugGroups = new Map<string, ActiveSession[]>()
   for (const s of sessions) {
+    if (s.slug === currentSlug) continue
     const group = slugGroups.get(s.slug) ?? []
     group.push(s)
     slugGroups.set(s.slug, group)
