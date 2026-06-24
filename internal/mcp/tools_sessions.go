@@ -1085,6 +1085,15 @@ func (m *Manager) handleReplyToOrchestrator(sessionID string) server.ToolHandler
 			return mcp.NewToolResultError(fmt.Sprintf("writing to orchestrator: %v", err)), nil
 		}
 
+		// Reset the gate to fire-and-forget after a successful reply.
+		// The opt-in is a single-shot grant: the orchestrator briefs the
+		// session, the session replies once, the channel closes. Without
+		// this reset the session stays permanently open for additional
+		// unsolicited replies until the orchestrator's next explicit
+		// fire-and-forget send — which would defer the original bug by
+		// one turn instead of fixing it.
+		m.setReplyAllowed(sessionID, false)
+
 		// Audit log on the source idea — the reply is a state change
 		// the human may want to see in the timeline of THIS idea, not
 		// the orchestrator's history (which has no idea slug).

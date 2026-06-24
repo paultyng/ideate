@@ -896,6 +896,45 @@ func TestSendSessionInput_ReplyGateUpdatesAcrossSends(t *testing.T) {
 	}
 }
 
+// A successful reply consumes the opt-in. A subsequent reply without
+// a fresh send_session_input(include_reply_hint=true) must refuse —
+// the orchestrator's opt-in is a single-shot grant, not a persistent
+// open channel. Without this reset the original bug (agent spamming
+// the orchestrator on its own initiative) is deferred one turn rather
+// than fixed.
+func TestReplyToOrchestrator_OptInIsSingleShot(t *testing.T) {
+	t.Parallel()
+	m, _, resolver := setupOrchestrator(t)
+	resolver.mapping["alpha-running"] = "alpha"
+
+	// Brief with opt-in.
+	sendReq := mcp.CallToolRequest{}
+	sendReq.Params.Arguments = map[string]any{
+		"uuid":               "alpha-running",
+		"text":               "please report when done",
+		"include_reply_hint": true,
+	}
+	if res, err := m.handleSendSessionInput("orchestrator-ses")(context.Background(), sendReq); err != nil || res.IsError {
+		t.Fatalf("send: err=%v body=%v", err, res.Content)
+	}
+
+	// First reply lands.
+	replyReq := mcp.CallToolRequest{}
+	replyReq.Params.Arguments = map[string]any{"text": "done"}
+	if res, err := m.handleReplyToOrchestrator("alpha-running")(context.Background(), replyReq); err != nil || res.IsError {
+		t.Fatalf("first reply: err=%v body=%v", err, res.Content)
+	}
+
+	// Second reply — without a fresh send — must refuse.
+	res, err := m.handleReplyToOrchestrator("alpha-running")(context.Background(), replyReq)
+	if err != nil {
+		t.Fatalf("second reply handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("second reply should refuse after the opt-in was consumed; got %v", res.Content)
+	}
+}
+
 // include_reply_hint=true opts into the reply advertisement so the
 // receiving agent learns about reply_to_orchestrator. Used when the
 // orchestrator actually wants a structured reply routed back (the
