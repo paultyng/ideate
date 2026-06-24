@@ -24,7 +24,7 @@
     "@milkdown/utils": "^7.20.0",
     "@xterm/addon-fit": "^0.12.0-beta.287",
     "@xterm/addon-web-links": "^0.13.0-beta.287",
-    "@xterm/addon-webgl": "^0.20.0-beta.253",
+    "@xterm/addon-webgl": "^0.20.0-beta.286",
     "@xterm/xterm": "^6.1.0-beta.285",
     "lucide-react": "^1.21.0",
     "react": "^18.3.0",
