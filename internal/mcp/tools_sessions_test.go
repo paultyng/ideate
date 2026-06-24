@@ -798,6 +798,104 @@ func TestSendSessionInput_NoReplyHint(t *testing.T) {
 	}
 }
 
+// After a fire-and-forget send (include_reply_hint=false), the target
+// session's reply_to_orchestrator must refuse — guarding against the
+// previously-observed bug where the agent ignored the missing hint and
+// replied anyway, pulling the orchestrator back into a turn the user
+// explicitly opted out of.
+func TestSendSessionInput_NoReplyHintBlocksSubsequentReply(t *testing.T) {
+	t.Parallel()
+	m, _, resolver := setupOrchestrator(t)
+	// alpha-ses is the calling session inside the target idea, which is
+	// where reply_to_orchestrator runs after the orchestrator briefs it.
+	resolver.mapping["alpha-running"] = "alpha"
+
+	// Brief the session fire-and-forget.
+	sendReq := mcp.CallToolRequest{}
+	sendReq.Params.Arguments = map[string]any{
+		"uuid":               "alpha-running",
+		"text":               "do the thing; don't report back",
+		"include_reply_hint": false,
+	}
+	if res, err := m.handleSendSessionInput("orchestrator-ses")(context.Background(), sendReq); err != nil || res.IsError {
+		t.Fatalf("send: err=%v body=%v", err, res.Content)
+	}
+
+	// Now try to reply from within that target session — should refuse.
+	replyReq := mcp.CallToolRequest{}
+	replyReq.Params.Arguments = map[string]any{"text": "here's what I did"}
+	res, err := m.handleReplyToOrchestrator("alpha-running")(context.Background(), replyReq)
+	if err != nil {
+		t.Fatalf("reply handler: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("reply should have been blocked after fire-and-forget send; got %v", res.Content)
+	}
+	if len(res.Content) > 0 {
+		if tc, ok := res.Content[0].(mcp.TextContent); ok && !strings.Contains(tc.Text, "fire-and-forget") {
+			t.Errorf("error text should explain the block reason: %q", tc.Text)
+		}
+	}
+}
+
+// Opting in (include_reply_hint=true) leaves reply_to_orchestrator open.
+// A subsequent reply must land normally.
+func TestSendSessionInput_ReplyHintOptInAllowsReply(t *testing.T) {
+	t.Parallel()
+	m, _, resolver := setupOrchestrator(t)
+	resolver.mapping["alpha-running"] = "alpha"
+
+	sendReq := mcp.CallToolRequest{}
+	sendReq.Params.Arguments = map[string]any{
+		"uuid":               "alpha-running",
+		"text":               "please report when finished",
+		"include_reply_hint": true,
+	}
+	if res, err := m.handleSendSessionInput("orchestrator-ses")(context.Background(), sendReq); err != nil || res.IsError {
+		t.Fatalf("send: err=%v body=%v", err, res.Content)
+	}
+
+	replyReq := mcp.CallToolRequest{}
+	replyReq.Params.Arguments = map[string]any{"text": "finished"}
+	res, err := m.handleReplyToOrchestrator("alpha-running")(context.Background(), replyReq)
+	if err != nil {
+		t.Fatalf("reply handler: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("reply should have been allowed after opt-in send; got %v", res.Content)
+	}
+}
+
+// A fire-and-forget send followed by an opt-in send re-opens reply.
+// Tests that the per-session state is updated, not write-once.
+func TestSendSessionInput_ReplyGateUpdatesAcrossSends(t *testing.T) {
+	t.Parallel()
+	m, _, resolver := setupOrchestrator(t)
+	resolver.mapping["alpha-running"] = "alpha"
+
+	for _, hint := range []bool{false, true} {
+		sendReq := mcp.CallToolRequest{}
+		sendReq.Params.Arguments = map[string]any{
+			"uuid":               "alpha-running",
+			"text":               "step",
+			"include_reply_hint": hint,
+		}
+		if res, err := m.handleSendSessionInput("orchestrator-ses")(context.Background(), sendReq); err != nil || res.IsError {
+			t.Fatalf("send hint=%v: err=%v body=%v", hint, err, res.Content)
+		}
+	}
+
+	replyReq := mcp.CallToolRequest{}
+	replyReq.Params.Arguments = map[string]any{"text": "done"}
+	res, err := m.handleReplyToOrchestrator("alpha-running")(context.Background(), replyReq)
+	if err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("reply should be allowed after the most-recent send opted in; got %v", res.Content)
+	}
+}
+
 // include_reply_hint=true opts into the reply advertisement so the
 // receiving agent learns about reply_to_orchestrator. Used when the
 // orchestrator actually wants a structured reply routed back (the

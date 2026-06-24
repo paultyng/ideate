@@ -183,6 +183,13 @@ type Manager struct {
 	// lastNotify carries per-session last-emit timestamps for the
 	// notify_user rate limiter. Guarded by mu.
 	lastNotify map[string]time.Time
+	// replyAllowed gates reply_to_orchestrator per session UUID. Set
+	// by send_session_input from the include_reply_hint arg; a value
+	// of false (after an explicit fire-and-forget send) blocks the
+	// target session's next reply attempt. Map miss = no recent send
+	// = reply allowed (preserves spontaneous-reply behavior for
+	// agents that initiate the conversation). Guarded by mu.
+	replyAllowed map[string]bool
 }
 
 // NewManager creates a new MCP manager. events may be nil — emits

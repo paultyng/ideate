@@ -209,6 +209,12 @@ func (m *Manager) handleStartIdeaSession(sessionID string) server.ToolHandlerFun
 			// turn, not an orchestrator-routed reply. The
 			// send_session_input wrapper "orchestrator: ..." is for
 			// cross-session attribution and is wrong here.
+			//
+			// Initial prompts are fire-and-forget by design — the
+			// orchestrator briefs the session; the session does the
+			// work. Block reply_to_orchestrator until the orchestrator
+			// explicitly opts in via send_session_input(include_reply_hint=true).
+			m.setReplyAllowed(uuid, false)
 			if err := m.writeBufferedInput(uuid, "", initialPrompt, initialPromptSubmit); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("writing initial_prompt: %v", err)), nil
 			}
@@ -783,6 +789,35 @@ const orchestratorInputPrefixWithReplyHint = "[Input from Orchestrating Agent �
 // orchestrator can route the reply back to the right context.
 const replyInputPrefixFmt = "[Reply from %s]"
 
+// setReplyAllowed records whether the target session may reply to the
+// orchestrator on its next turn. Called from send_session_input + the
+// start_idea_session initial_prompt path. A `false` value blocks the
+// next reply_to_orchestrator from that session; map miss leaves the
+// previous behavior intact (spontaneous replies still allowed).
+func (m *Manager) setReplyAllowed(uuid string, allowed bool) {
+	if uuid == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.replyAllowed == nil {
+		m.replyAllowed = map[string]bool{}
+	}
+	m.replyAllowed[uuid] = allowed
+}
+
+// replyAllowedFor reports whether the session may currently reply to
+// the orchestrator. Returns (allowed, explicit) — `explicit` is true
+// when send_session_input has set the flag at least once for this
+// session; false when the map has no entry yet (the legacy
+// no-prior-send case).
+func (m *Manager) replyAllowedFor(uuid string) (allowed bool, explicit bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	v, ok := m.replyAllowed[uuid]
+	return v, ok
+}
+
 // softNewline is the byte sequence that puts a newline in a TUI's
 // prompt buffer WITHOUT submitting — equivalent to Shift+Enter in
 // Claude Code's TUI (and what TerminalPanel's keyboard handler emits
@@ -899,10 +934,18 @@ func (m *Manager) handleSendSessionInput(sessionID string) server.ToolHandlerFun
 		// reverse channel for interactive orchestration. Default-on
 		// caused the orchestrator to relay session output and pull the
 		// user back into a loop they'd already said they'd drive.
+		//
+		// The same flag now also gates reply_to_orchestrator: an explicit
+		// false records "do not reply" on the target, and the reply
+		// handler refuses. Previously the hint was advisory and the agent
+		// could still call reply, sending the orchestrator back into a
+		// turn the user explicitly opted out of.
+		allowReply := request.GetBool("include_reply_hint", false)
 		prefix := orchestratorInputPrefix
-		if request.GetBool("include_reply_hint", false) {
+		if allowReply {
 			prefix = orchestratorInputPrefixWithReplyHint
 		}
+		m.setReplyAllowed(targetUUID, allowReply)
 		if err := m.writeBufferedInput(targetUUID, prefix, text, request.GetBool("submit", true)); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("writing to session: %v", err)), nil
 		}
@@ -998,6 +1041,17 @@ func (m *Manager) handleReplyToOrchestrator(sessionID string) server.ToolHandler
 		text := request.GetString("text", "")
 		if text == "" {
 			return mcp.NewToolResultError("text is required"), nil
+		}
+
+		// Reply gate: if the orchestrator's most recent send to this
+		// session explicitly set include_reply_hint=false (or the
+		// session was briefed via start_idea_session.initial_prompt),
+		// the reply tool refuses. Map miss = no recent orchestrator
+		// send = spontaneous reply, which we still allow.
+		if allowed, explicit := m.replyAllowedFor(sessionID); explicit && !allowed {
+			return mcp.NewToolResultError(
+				"reply_to_orchestrator blocked: the orchestrator's last send_session_input set include_reply_hint=false (fire-and-forget). Wait for the user to opt in to a reply channel.",
+			), nil
 		}
 
 		// Resolve the calling idea so the prefix can identify the
