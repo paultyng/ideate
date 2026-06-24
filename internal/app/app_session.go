@@ -633,14 +633,26 @@ type ActiveSessionResolution struct {
 }
 
 // ResolveActiveSession implements the ideate://ideas/<slug>/active-session
-// resolution chain:
+// resolution chain, mirroring `sessionNav.resolveSessionTarget` on the
+// frontend so the deep-link and Cmd+K quick switcher agree on what
+// "active session" means:
 //
 //  1. Reject invalid slugs (path-traversal / wrong charset) — empty result.
-//  2. If a running session exists for the idea (any agent_type) → uuid, ok=true.
-//  3. Else iterate dormant sessions; resume the first one that starts
-//     cleanly. A failing dormant doesn't abort — continue to the next
-//     candidate (different agent type, different runner state).
-//  4. Else → empty result with ok=false; caller falls back to the idea
+//  2. If a running session exists for the idea (any agent_type) →
+//     uuid, ok=true.
+//  3. Else if the most-recent non-running session is user-terminated
+//     (completed/stopped/failed) AND newer than every dormant, return
+//     its UUID with resumed=false — the frontend navigates to the
+//     session-detail page so the user can explicitly resume. Respects
+//     the "user said stop" contract; previously an older dormant would
+//     shadow a fresh /exit'd session.
+//  4. Else iterate dormant sessions newest-first; resume the first one
+//     that starts cleanly. A failing dormant doesn't abort — continue
+//     to the next candidate (different agent type, different runner
+//     state).
+//  5. Else if any terminated session exists (no dormant beat it), return
+//     its UUID with resumed=false so the frontend lands on session-detail.
+//  6. Else → empty result with ok=false; caller falls back to the idea
 //     detail page.
 //
 // The slug arrives from a URL parser on the frontend (`ideate://ideas/<slug>/active-session`).
@@ -670,10 +682,39 @@ func (a *App) ResolveActiveSession(slug string) *ActiveSessionResolution {
 		}
 	}
 
-	// Step 2: resume the first dormant session whose StartIdeaSession
-	// succeeds. A single failing candidate (no registered runner for
-	// that agent type, missing binary, etc.) shouldn't shadow other
-	// dormant entries — fall through and try the next.
+	// Partition non-running entries: newest dormant (the resume candidate)
+	// and newest user-terminated (completed/stopped/failed). ListSessions
+	// returns started-DESC so the first match in either bucket is the
+	// newest of its kind.
+	var newestDormant, newestTerminated *model.AgentSession
+	for i := range sessions {
+		s := &sessions[i]
+		switch s.Status {
+		case model.SessionStatusDormant:
+			if newestDormant == nil {
+				newestDormant = s
+			}
+		case model.SessionStatusCompleted,
+			model.SessionStatusStopped,
+			model.SessionStatusFailed:
+			if newestTerminated == nil {
+				newestTerminated = s
+			}
+		}
+	}
+
+	// Step 2: a fresh user-terminated session outranks every older
+	// dormant. Return without resuming so the frontend lands on the
+	// session-detail page; the user already said stop.
+	if newestTerminated != nil &&
+		(newestDormant == nil || newestTerminated.Started.After(newestDormant.Started)) {
+		return &ActiveSessionResolution{UUID: newestTerminated.UUID, OK: true}
+	}
+
+	// Step 3: resume the newest dormant that starts cleanly. A single
+	// failing candidate (no registered runner for that agent type,
+	// missing binary, etc.) shouldn't shadow other dormant entries —
+	// fall through and try the next.
 	for _, s := range sessions {
 		if s.Status != model.SessionStatusDormant {
 			continue
@@ -688,6 +729,13 @@ func (a *App) ResolveActiveSession(slug string) *ActiveSessionResolution {
 			continue
 		}
 		return &ActiveSessionResolution{UUID: res.UUID, Resumed: true, OK: true}
+	}
+
+	// Step 4: no dormant either resumed or was newer — fall back to the
+	// most recent terminated session if one exists. Same no-auto-resume
+	// rule as step 2.
+	if newestTerminated != nil {
+		return &ActiveSessionResolution{UUID: newestTerminated.UUID, OK: true}
 	}
 
 	return &ActiveSessionResolution{}
