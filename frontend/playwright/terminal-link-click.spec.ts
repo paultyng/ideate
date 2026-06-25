@@ -288,6 +288,49 @@ test.describe('Terminal link clicks', () => {
     expect(opens.filter((u) => u.startsWith('ideate://'))).toEqual([])
   })
 
+  // Regression for the xterm.js allowNonHttpProtocols gate: OSC 8
+  // hyperlinks with non-http(s) schemes used to render the visual
+  // underline but the click was silently dropped before linkHandler
+  // fired. TerminalPanel now sets allowNonHttpProtocols:true on the
+  // linkHandler; this test guards that flag.
+  test('OSC 8 hyperlink with ideate:// scheme routes in-app, NOT openExternal', async ({ page }) => {
+    await page.goto('/')
+    await enablePtyCapture(page)
+
+    const uuid = await page.evaluate(async () => {
+      // @ts-expect-error wails binding
+      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
+      return r.uuid
+    })
+
+    const containerSelector = '.orchestrator-host .terminal-container'
+    await page.waitForSelector(containerSelector, { timeout: 10000 })
+    await patchBrowserOpenURL(page)
+    await waitForAgentReady(page, uuid)
+
+    // Upstream /link <url> [text] emits an OSC 8 hyperlink. Use
+    // ideate://orchestrator as the URL — same display text/href
+    // pattern as the https variant above, but a different scheme.
+    // requireOscLink on clickLinkRow ensures the click targets the
+    // OSC 8 cell, not a plain-text URL match.
+    await page.evaluate(async (id) => {
+      // @ts-expect-error wails binding
+      await window.go.app.App.WriteToSession(id, '/link ideate://orchestrator orchestrator surface\r')
+    }, uuid)
+
+    await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
+      .toContain('orchestrator surface')
+
+    const clicked = await clickLinkRow(page, containerSelector, 'orchestrator surface', { requireOscLink: true })
+    expect(clicked).toBeTruthy()
+
+    // In-app dispatch: HashRouter route changes AND BrowserOpenURL was
+    // never invoked for the ideate: scheme.
+    await expect(page).toHaveURL(/#\/orchestrator(?:$|\?)/, { timeout: 5000 })
+    const opens = (await getCapturedURLs(page)).urls
+    expect(opens.filter((u) => u.startsWith('ideate://'))).toEqual([])
+  })
+
   test('OSC 8 hyperlink click routes through openExternal after drawer drag', async ({ page }) => {
     await page.goto('/')
     await enablePtyCapture(page)
