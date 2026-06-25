@@ -164,10 +164,13 @@ test.describe('Orchestrator orchestrator', () => {
   })
 
   // Full round-trip: orchestrator delegates a turn via send_session_input
-  // (default include_reply_hint=true), then the receiving idea agent calls
-  // reply_to_orchestrator, and the reply lands in the orchestrator terminal
-  // wrapped with `[Reply from <idea name>]`. Exercises the per-idea
-  // reply_to_orchestrator MCP tool plus the wire format on both sides.
+  // with include_reply_hint=true (interactive-orchestration opt-in), then
+  // the receiving idea agent calls reply_to_orchestrator, and the reply
+  // lands in the orchestrator terminal wrapped with `[Reply from <idea name>]`.
+  // Exercises the per-idea reply_to_orchestrator MCP tool plus the wire
+  // format on both sides. include_reply_hint=true is REQUIRED — the gate
+  // introduced when reply was made opt-in refuses reply_to_orchestrator
+  // when the most recent send was fire-and-forget (the default).
   test('reply_to_orchestrator routes a reply back to the orchestrator', async ({ page }) => {
     const ideaName = `Orch Reply ${Date.now()}`
 
@@ -218,9 +221,13 @@ test.describe('Orchestrator orchestrator', () => {
     await waitForTerminalMount(page, ideaResult.uuid)
 
     // Step 1 — orchestrator delegates a turn to the idea session.
+    // include_reply_hint=true opens the reply gate so step 2's
+    // reply_to_orchestrator lands instead of being refused as
+    // fire-and-forget.
     const sendArgs = JSON.stringify({
       uuid: ideaResult.uuid,
       text: 'check the index strategy',
+      include_reply_hint: true,
     })
     await page.evaluate(
       async ([uuid, payload]) => {
