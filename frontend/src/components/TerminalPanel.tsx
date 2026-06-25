@@ -55,8 +55,18 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
       // from the href, e.g. as emitted by `gh`, `claude`, modern coreutils).
       // handleLink dispatches: ideate:// → in-app HashRouter; others →
       // openExternal allow-list (http/https/mailto).
+      //
+      // allowNonHttpProtocols defaults to false in xterm.js, which makes
+      // non-http(s) OSC 8 URLs render with the visual underline but
+      // silently swallows the click — that's why `ideate://` hyperlinks
+      // look right and do nothing. The security concern xterm.js cites
+      // (XSS via attacker-controlled scheme) is already covered by our
+      // dispatcher: handleLink only routes `ideate://` in-app and
+      // delegates everything else to openExternal's allow-list, which
+      // refuses `javascript:`, `data:`, `file:`, etc.
       linkHandler: {
         activate: (_, uri) => { handleLink(uri, navigate) },
+        allowNonHttpProtocols: true,
       },
     })
     terminalRef.current = terminal
