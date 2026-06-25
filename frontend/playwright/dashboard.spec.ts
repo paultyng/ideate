@@ -695,6 +695,12 @@ test.describe('Dashboard', () => {
 // booting (MCP connected). See waitForAgentReady's comment in
 // ptyCapture.ts for why we don't poll the banner border rows under
 // testagent v0.4+'s bubbletea v2 inline rendering.
+//
+// Timeout matches ptyCapture.ts waitForAgentReady (15s): MCP
+// connect latency on loaded GitHub Actions runners has been the
+// dominant flake driver on this assertion. The earlier 5s was too
+// tight; bumping costs ~0 on the happy path (banner usually lands
+// in 1-2s) and gives slow CI the headroom it needs.
 async function waitForBanner(page: import('@playwright/test').Page) {
   try {
     await page.waitForFunction(
@@ -732,7 +738,7 @@ async function waitForBanner(page: import('@playwright/test').Page) {
         }
         return false
       },
-      { timeout: 5000 },
+      { timeout: 15000 },
     )
   } catch (err) {
     // Diagnostic on timeout: dump every registered terminal's buffer so
