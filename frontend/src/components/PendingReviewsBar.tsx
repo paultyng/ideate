@@ -9,6 +9,11 @@ interface PendingReviewSummary {
   label: string
   created: string
   ideaSlug?: string
+  // session is the agent session UUID that requested the review when
+  // known. Used to wire `?fromSession=<slug>:<uuid>` onto the chip nav
+  // URL so the review's Submit/Cancel handlers return to the launching
+  // session instead of stranding the user on /review.
+  session?: string
 }
 
 // Polling backstop in case a review:changed event is dropped (e.g. the
@@ -75,7 +80,15 @@ export default function PendingReviewsBar() {
   if (reviews.length === 0) return null
 
   const goTo = (r: PendingReviewSummary) => () => {
-    navigate(`/review?reviewId=${encodeURIComponent(r.id)}`)
+    let url = `/review?reviewId=${encodeURIComponent(r.id)}`
+    // When the review came from an agent session, carry fromSession so
+    // Review/MarkdownReview's submit + cancel handlers can navigate back
+    // to the launching session instead of stranding the user on
+    // /review. Matches the in-session "Open review" banner path.
+    if (r.ideaSlug && r.session) {
+      url += `&fromSession=${encodeURIComponent(`${r.ideaSlug}:${r.session}`)}`
+    }
+    navigate(url)
   }
 
   return (

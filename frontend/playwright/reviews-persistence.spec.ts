@@ -37,6 +37,12 @@ interface MarkdownReviewRecord {
   created: string
   body?: string
   draft_body?: string
+  // Optional originating-session metadata. When the chip is set, the
+  // PendingReviewsBar wires `?fromSession=<slug>:<session>` onto the
+  // nav URL so the review's submit/cancel handler returns to the
+  // launching session.
+  session?: string
+  idea_slug?: string
   markdown: {
     path: string
     original?: string
@@ -306,6 +312,51 @@ test.describe('Pending reviews bar — chip surfaces open reviews', () => {
     const chip = page.locator(`[data-testid="pending-review-chip"][data-review-id="${id}"]`)
     await expect(chip).toBeVisible({ timeout: 10000 })
     await expect(chip).toContainText('proposal.md')
+  })
+
+  test('chip carries fromSession when the review knows its origin', async ({ page }) => {
+    const id = 'persistence-bar-md'
+    writeReview({
+      id, kind: 'markdown', status: 'pending',
+      created: new Date().toISOString(),
+      session: '7e2c3a8b-1d4f-4a6e-9c12-3f5d8e1a2b3c',
+      idea_slug: 'demo-idea',
+      markdown: { path: '/tmp/test/origin.md', original: '# Title\n' },
+    })
+
+    await page.goto('/')
+    const chip = page.locator(`[data-testid="pending-review-chip"][data-review-id="${id}"]`)
+    await expect(chip).toBeVisible({ timeout: 10000 })
+
+    await chip.click()
+    // Submit/Cancel handlers in Review/MarkdownReview branch on the
+    // fromSession query param to decide whether to navigate back to
+    // /idea/<slug>/session/<uuid> on completion. Asserting the URL
+    // contains the param is the safest cross-version check — internal
+    // routing tests cover the click-back behavior.
+    await expect(page).toHaveURL(new RegExp(`reviewId=${id}`))
+    await expect(page).toHaveURL(/fromSession=demo-idea%3A7e2c3a8b-1d4f-4a6e-9c12-3f5d8e1a2b3c/)
+  })
+
+  test('chip omits fromSession when origin session is unknown', async ({ page }) => {
+    // Disk seed without session/idea_slug — covers the orphaned-review
+    // path (orchestrator started a review then died, or the original
+    // session never had a session UUID on disk).
+    const id = 'persistence-bar-md'
+    writeReview({
+      id, kind: 'markdown', status: 'pending',
+      created: new Date().toISOString(),
+      markdown: { path: '/tmp/test/origin.md', original: '# Title\n' },
+    })
+
+    await page.goto('/')
+    const chip = page.locator(`[data-testid="pending-review-chip"][data-review-id="${id}"]`)
+    await expect(chip).toBeVisible({ timeout: 10000 })
+    await chip.click()
+
+    await expect(page).toHaveURL(new RegExp(`reviewId=${id}`))
+    // Without origin metadata, fromSession is not appended.
+    await expect(page).not.toHaveURL(/fromSession=/)
   })
 
   test('chip disappears via review:changed event, not polling backstop', async ({ page }) => {

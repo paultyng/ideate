@@ -97,6 +97,11 @@ type PendingReviewSummary struct {
 	Label    string `json:"label"`   // file basename for markdown; "<repo> <base>..<head>" for diff
 	Created  string `json:"created"` // RFC3339; bar uses for age tooltip + sort
 	IdeaSlug string `json:"ideaSlug,omitempty"`
+	// Session is the agent session UUID that requested the review,
+	// when known. Frontend uses it to wire `?fromSession=<slug>:<uuid>`
+	// onto the chip nav URL so Submit/Cancel returns the user to the
+	// launching session instead of stranding them on the review page.
+	Session string `json:"session,omitempty"`
 	// Path is the absolute filesystem path of the file under review.
 	// Set only for markdown reviews; empty for diffs. Idea-detail
 	// sidebar uses it to dot the matching file row.
@@ -126,6 +131,7 @@ func (a *App) ListPendingReviews() []PendingReviewSummary {
 			Label:    pendingReviewLabel(r),
 			Created:  r.Created.Format(time.RFC3339Nano),
 			IdeaSlug: r.IdeaSlug,
+			Session:  r.Session,
 			Path:     path,
 		})
 	}
