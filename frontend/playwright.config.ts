@@ -9,7 +9,14 @@ const collectScreenshots = process.env.COLLECT_SCREENSHOTS === '1'
 
 export default defineConfig({
   testDir: './playwright',
-  timeout: 30000,
+  // 60s test-level budget. Many specs spin up real testagent processes
+  // and wait on the MCP-connect lifecycle marker; CI runners under
+  // load take 15-25s just for that step, leaving a 30s budget too
+  // tight after the goto + DOM-mount steps. The flake pattern was
+  // exclusively "Test timeout of 30000ms exceeded" with the inner
+  // waitForFunction never reaching its own 15s timeout. Retries (2)
+  // still cap total wall time on a true hang.
+  timeout: 60000,
   // Retries cover CI-only flakes around orchestrator session lifecycle
   // and xterm.js layout settle on the slow macOS-14 runner. Local runs
   // on M-series stay deterministic — set to 0 there so genuine bugs

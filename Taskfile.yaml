@@ -284,7 +284,7 @@ tasks:
       TEST_DIFF_HEAD: '{{.TEST_DIFF_HEAD | default "ae32bef"}}'
       TEST_DIFF_REPO: '{{.TEST_DIFF_REPO | default "."}}'
       TEST_SPEC: '{{.TEST_SPEC | default ""}}'
-      TEST_TIMEOUT: '{{.TEST_TIMEOUT | default "30000"}}'
+      TEST_TIMEOUT: '{{.TEST_TIMEOUT | default "60000"}}'
       # Inactivity-based exit threshold; resets on every Write to the
       # session (see Session.WatchInactivity). 30s gives orchestrator
       # tests enough headroom for setup before the MCP-mediated write
