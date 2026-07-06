@@ -1,6 +1,6 @@
 Update one or more backlog items on the current idea. Bulk-by-default: pass a single-element `patches` array for one item, or sweep multiple items in one call (status transition over a whole queue, dependency cleanup after a blocker landed, scope extensions on a related set).
 
-Each patch must carry `id` plus at least one mutable field. Slice fields (`depends_on`, `affects`) **replace** the existing value; pass `[]` to clear; omit to leave unchanged.
+Each patch must carry `id` plus at least one mutable field. Slice fields (`depends_on`, `affects`, `labels`) **replace** the existing value; pass `[]` to clear; omit to leave unchanged.
 
 When to update:
 
@@ -17,7 +17,7 @@ When to update:
   - `id` (string, required).
   - `title`, `body` (string, optional): new value; empty string leaves alone (v1 has no explicit-clear path for strings).
   - `status` (string, optional): one of `open`, `in_progress`, `done`, `wontfix`.
-  - `depends_on`, `affects` (arrays, optional): replace; `[]` clears; omit to leave alone.
+  - `depends_on`, `affects`, `labels` (arrays, optional): replace; `[]` clears; omit to leave alone.
   - `external_url` (string, optional): set the upstream tracker URL; empty leaves the existing value alone.
 
 ## Returns

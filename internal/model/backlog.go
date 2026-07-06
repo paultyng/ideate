@@ -66,6 +66,13 @@ type BacklogItem struct {
 	// Paths are stored verbatim — no existence check (an agent
 	// often marks a task that will create a new file).
 	Affects []string `json:"affects,omitempty"`
+
+	// Labels are free-form string tags for cheap triage — e.g.
+	// "quick-win", "blocked-external", "nit". No enum; no validation;
+	// case-preserved on write, case-sensitive on filter. The
+	// list_backlog filter param matches any-overlap semantics so
+	// items with multiple labels surface in every relevant filter.
+	Labels []string `json:"labels,omitempty"`
 }
 
 // RepairBacklogStatus coerces an unknown BacklogStatus into Open.

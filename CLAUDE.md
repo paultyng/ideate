@@ -267,9 +267,9 @@ There is no separate `update_resource` tool — `add_resource` is the single ups
 
 ### Backlog
 
-Each idea owns a task list at `<slug>/backlog.json` — a JSON array of `model.BacklogItem` (`{id, title, body?, status, created, updated, source?, assignee_session?, external_url?, depends_on?, affects?}`). Same full-rewrite pattern as `idea.md` resources; expected to stay O(100) items per idea. `status` ∈ {`open`, `in_progress`, `done`, `wontfix`} with read-repair on parse (unknown values → `open`).
+Each idea owns a task list at `<slug>/backlog.json` — a JSON array of `model.BacklogItem` (`{id, title, body?, status, created, updated, source?, assignee_session?, external_url?, depends_on?, affects?, labels?}`). Same full-rewrite pattern as `idea.md` resources; expected to stay O(100) items per idea. `status` ∈ {`open`, `in_progress`, `done`, `wontfix`} with read-repair on parse (unknown values → `open`).
 
-`depends_on` is the sequencing signal — bare `id` for same-idea, `slug:id` for cross-idea. `affects` lists file paths (relative to idea root) the item is expected to touch; the orchestrator uses non-overlapping `affects` sets to fan work out to parallel subagents without write conflicts. Both stored without validation in v1 (no cycle detection, no existence checks).
+`depends_on` is the sequencing signal — bare `id` for same-idea, `slug:id` for cross-idea. `affects` lists file paths (relative to idea root) the item is expected to touch; the orchestrator uses non-overlapping `affects` sets to fan work out to parallel subagents without write conflicts. Both stored without validation in v1 (no cycle detection, no existence checks). `labels` are free-form string tags for triage (case-sensitive); `list_backlog`'s `labels` filter matches on any-overlap so multi-labeled items surface in every relevant filter.
 
 `external_url` points at the upstream issue / ticket / task the item mirrors when synced to an external tracker (GitHub Issues, Jira, Todoist). Same pattern as `Resource.URL` — the URL is both the navigation target and the canonical identity for sync. Empty for local-only items (the v1 default; sync pipeline isn't built yet).
 

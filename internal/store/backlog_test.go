@@ -195,6 +195,64 @@ func TestBacklog_DependsOnAndAffects(t *testing.T) {
 	}
 }
 
+// TestBacklog_LabelsRoundTripAndReplace mirrors the DependsOn/Affects
+// contract for the labels field: nil-leave-alone, non-nil-replace,
+// explicit-[]-clear.
+func TestBacklog_LabelsRoundTripAndReplace(t *testing.T) {
+	t.Parallel()
+	store, slug := newBacklogTestStore(t)
+	ctx := context.Background()
+
+	stored, err := store.AddBacklogItem(ctx, slug, model.BacklogItem{
+		Title:  "labelled item",
+		Labels: []string{"quick-win", "nit"},
+	})
+	if err != nil {
+		t.Fatalf("AddBacklogItem: %v", err)
+	}
+	if len(stored.Labels) != 2 || stored.Labels[0] != "quick-win" {
+		t.Errorf("Labels on add = %+v", stored.Labels)
+	}
+
+	items, _ := store.ListBacklog(ctx, slug)
+	if len(items[0].Labels) != 2 || items[0].Labels[1] != "nit" {
+		t.Errorf("round-trip lost labels: %+v", items[0].Labels)
+	}
+
+	// Nil patch leaves labels alone.
+	if err := store.UpdateBacklogItem(ctx, slug, stored.ID, model.BacklogItem{
+		Title: "renamed",
+	}); err != nil {
+		t.Fatalf("UpdateBacklogItem (title only): %v", err)
+	}
+	items, _ = store.ListBacklog(ctx, slug)
+	if len(items[0].Labels) != 2 {
+		t.Errorf("nil labels patch clobbered existing: %+v", items[0].Labels)
+	}
+
+	// Non-nil replaces.
+	if err := store.UpdateBacklogItem(ctx, slug, stored.ID, model.BacklogItem{
+		Labels: []string{"blocked-external"},
+	}); err != nil {
+		t.Fatalf("UpdateBacklogItem (replace): %v", err)
+	}
+	items, _ = store.ListBacklog(ctx, slug)
+	if len(items[0].Labels) != 1 || items[0].Labels[0] != "blocked-external" {
+		t.Errorf("Labels after replace = %+v", items[0].Labels)
+	}
+
+	// Explicit [] clears.
+	if err := store.UpdateBacklogItem(ctx, slug, stored.ID, model.BacklogItem{
+		Labels: []string{},
+	}); err != nil {
+		t.Fatalf("UpdateBacklogItem (clear): %v", err)
+	}
+	items, _ = store.ListBacklog(ctx, slug)
+	if len(items[0].Labels) != 0 {
+		t.Errorf("Labels should be cleared, got %+v", items[0].Labels)
+	}
+}
+
 // TestBacklog_ConcurrentAddNoLostWrites — 50 goroutines each add one
 // item to the same idea. Without the per-slug write lock, concurrent
 // `List → mutate → write` races silently lose items (winner of the
