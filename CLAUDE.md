@@ -180,7 +180,7 @@ Orthogonal dimensions:
 
 **Status lifecycle is an explicit state machine.** Transitions go through dedicated MCP tools — `archive_idea`, `unarchive_idea`, `pause_idea`, `resume_idea` — not the `update_idea*` tools (which reject a `status` field). Each transition carries its side effects:
 
-- `archive_idea(slug, force)`: refuses on running sessions (unless `force=true`, then stops them); refuses on dirty worktrees (unless `force=true`); persists each linked repo's origin URL as a `repo` resource; unlinks worktrees; flips status to `archived`.
+- `archive_idea(slug, force)`: refuses on running sessions (unless `force=true`, then stops them); refuses on dirty worktrees (unless `force=true`); refuses on open/in-progress backlog items (unless `force=true`); persists each linked repo's origin URL as a `repo` resource; unlinks worktrees; flips status to `archived`. The backlog file is preserved so unarchive restores the queue intact.
 - `unarchive_idea(slug)`: flips status to `active`; returns `RepoResources` listing the `repo` entries — caller re-links manually with `link_repo_by_slug` (no auto-clone in v1).
 - `pause_idea(slug, until?)`: status → `paused`, sets `PauseUntil` (optional).
 - `resume_idea(slug)`: status → `active`, clears `PauseUntil`.

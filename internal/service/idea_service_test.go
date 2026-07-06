@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -610,6 +611,150 @@ func TestService_Archive_ForceStopsRunningSessions(t *testing.T) {
 	}
 	if got.Status != model.StatusArchived {
 		t.Errorf("Status = %q, want %q", got.Status, model.StatusArchived)
+	}
+}
+
+// TestService_Archive_RefusesOnOpenBacklog covers the backlog gate:
+// an open/in-progress item blocks archive without force. The typed
+// error carries the count + up to 10 titles so the caller can surface
+// what would be buried before retrying.
+func TestService_Archive_RefusesOnOpenBacklog(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	svc, _ := newTestService(t)
+
+	idea := &model.Idea{Name: "archive backlog refuse", Status: model.StatusActive}
+	if err := svc.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := svc.AddBacklogItem(ctx, idea.Slug, model.BacklogItem{
+		Title:  "still open",
+		Status: model.BacklogStatusOpen,
+	}); err != nil {
+		t.Fatalf("AddBacklogItem: %v", err)
+	}
+
+	_, err := svc.Archive(ctx, idea.Slug, false)
+	if err == nil {
+		t.Fatal("expected error on open backlog, got nil")
+	}
+	var openErr *store.ErrOpenBacklogItems
+	if !errors.As(err, &openErr) {
+		t.Fatalf("expected *store.ErrOpenBacklogItems, got %T: %v", err, err)
+	}
+	if openErr.Count != 1 {
+		t.Errorf("Count = %d, want 1", openErr.Count)
+	}
+	if len(openErr.Titles) != 1 || openErr.Titles[0] != "still open" {
+		t.Errorf("Titles = %v, want [\"still open\"]", openErr.Titles)
+	}
+
+	got, _ := svc.Get(ctx, idea.Slug)
+	if got.Status == model.StatusArchived {
+		t.Error("idea should not be archived after open-backlog refusal")
+	}
+}
+
+// TestService_Archive_AllowsWhenAllBacklogDone confirms items in
+// done/wontfix state don't block archive. Only open/in_progress do.
+func TestService_Archive_AllowsWhenAllBacklogDone(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	svc, _ := newTestService(t)
+
+	idea := &model.Idea{Name: "archive backlog closed", Status: model.StatusActive}
+	if err := svc.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, status := range []model.BacklogStatus{model.BacklogStatusDone, model.BacklogStatusWontFix} {
+		if _, err := svc.AddBacklogItem(ctx, idea.Slug, model.BacklogItem{
+			Title:  "finished item " + string(status),
+			Status: status,
+		}); err != nil {
+			t.Fatalf("AddBacklogItem: %v", err)
+		}
+	}
+
+	if _, err := svc.Archive(ctx, idea.Slug, false); err != nil {
+		t.Fatalf("Archive should have succeeded with only done/wontfix items: %v", err)
+	}
+
+	got, _ := svc.Get(ctx, idea.Slug)
+	if got.Status != model.StatusArchived {
+		t.Errorf("Status = %q, want archived", got.Status)
+	}
+}
+
+// TestService_Archive_ForceOverridesOpenBacklog confirms force=true
+// bypasses the new gate.
+func TestService_Archive_ForceOverridesOpenBacklog(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	svc, _ := newTestService(t)
+
+	idea := &model.Idea{Name: "archive force backlog", Status: model.StatusActive}
+	if err := svc.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := svc.AddBacklogItem(ctx, idea.Slug, model.BacklogItem{
+		Title: "in flight",
+	}); err != nil {
+		t.Fatalf("AddBacklogItem: %v", err)
+	}
+
+	if _, err := svc.Archive(ctx, idea.Slug, true); err != nil {
+		t.Fatalf("Archive with force should have succeeded: %v", err)
+	}
+
+	got, _ := svc.Get(ctx, idea.Slug)
+	if got.Status != model.StatusArchived {
+		t.Errorf("Status = %q, want archived", got.Status)
+	}
+
+	// Backlog file preserved so unarchive restores intent.
+	items, err := svc.ListBacklog(ctx, idea.Slug)
+	if err != nil {
+		t.Fatalf("ListBacklog after force-archive: %v", err)
+	}
+	if len(items) != 1 || items[0].Title != "in flight" {
+		t.Errorf("backlog lost on force-archive; got %+v", items)
+	}
+}
+
+// TestService_Archive_ErrOpenBacklogTitlesCapped confirms the error
+// truncates its Titles slice at 10 while Count carries the full total.
+func TestService_Archive_ErrOpenBacklogTitlesCapped(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	svc, _ := newTestService(t)
+
+	idea := &model.Idea{Name: "archive many items", Status: model.StatusActive}
+	if err := svc.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	const total = 15
+	for i := 0; i < total; i++ {
+		if _, err := svc.AddBacklogItem(ctx, idea.Slug, model.BacklogItem{
+			Title: fmt.Sprintf("item %02d", i),
+		}); err != nil {
+			t.Fatalf("AddBacklogItem: %v", err)
+		}
+	}
+
+	_, err := svc.Archive(ctx, idea.Slug, false)
+	var openErr *store.ErrOpenBacklogItems
+	if !errors.As(err, &openErr) {
+		t.Fatalf("expected *store.ErrOpenBacklogItems, got %T: %v", err, err)
+	}
+	if openErr.Count != total {
+		t.Errorf("Count = %d, want %d", openErr.Count, total)
+	}
+	if len(openErr.Titles) != 10 {
+		t.Errorf("Titles length = %d, want 10 (capped)", len(openErr.Titles))
 	}
 }
 
