@@ -49,6 +49,11 @@ func listBacklogFilterSchema(props map[string]any) map[string]any {
 		},
 		"description": "Optional status filter; returns only items whose status is in the given set. Pass `[\"open\"]` for the common triage case or `[\"open\", \"in_progress\"]` to surface active work. Omit to return all.",
 	}
+	props["labels"] = map[string]any{
+		"type":        "array",
+		"items":       map[string]any{"type": "string"},
+		"description": "Optional labels filter; returns items whose `labels` intersect the given set (any-overlap match). Case-sensitive. Omit or pass `[]` to return all.",
+	}
 	props["include_body"] = map[string]any{
 		"type":        "boolean",
 		"description": "If true, include each item's `body` (Markdown context). Defaults to false because large backlogs blow tool-output caps otherwise. Set true when you need the body to pick up or summarize a task.",
@@ -257,7 +262,7 @@ func (m *Manager) handleListBacklogBySlug(sessionID string) server.ToolHandlerFu
 }
 
 func (m *Manager) listBacklogResponse(ctx context.Context, slug string, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	statuses, includeBody, err := parseListBacklogArgs(request.GetArguments())
+	statuses, labels, includeBody, err := parseListBacklogArgs(request.GetArguments())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -265,42 +270,58 @@ func (m *Manager) listBacklogResponse(ctx context.Context, slug string, request 
 	if err != nil {
 		return marshalBacklog(nil, err)
 	}
-	return marshalBacklog(filterAndProjectBacklog(items, statuses, includeBody), nil)
+	return marshalBacklog(filterAndProjectBacklog(items, statuses, labels, includeBody), nil)
 }
 
-// parseListBacklogArgs pulls the optional `status` (array of enum) and
-// `include_body` (bool) filters off the raw MCP arguments map.
+// parseListBacklogArgs pulls the optional `status` (array of enum),
+// `labels` (array of strings), and `include_body` (bool) filters off
+// the raw MCP arguments map.
 //
 // Unknown status values return an error (vs. silently dropping) so
 // callers learn the enum surface rather than getting empty results.
-func parseListBacklogArgs(args map[string]any) ([]model.BacklogStatus, bool, error) {
+// Label values are free-form; no validation.
+func parseListBacklogArgs(args map[string]any) ([]model.BacklogStatus, []string, bool, error) {
 	var statuses []model.BacklogStatus
 	if v, ok := args["status"]; ok && v != nil {
 		raw, ok := v.([]any)
 		if !ok {
-			return nil, false, errors.New("status must be an array of strings")
+			return nil, nil, false, errors.New("status must be an array of strings")
 		}
 		for i, e := range raw {
 			s, ok := e.(string)
 			if !ok {
-				return nil, false, fmt.Errorf("status[%d] must be a string", i)
+				return nil, nil, false, fmt.Errorf("status[%d] must be a string", i)
 			}
 			parsed, err := validateBacklogStatus(s)
 			if err != nil {
-				return nil, false, fmt.Errorf("status[%d]: %w", i, err)
+				return nil, nil, false, fmt.Errorf("status[%d]: %w", i, err)
 			}
 			statuses = append(statuses, parsed)
+		}
+	}
+	var labels []string
+	if v, ok := args["labels"]; ok && v != nil {
+		raw, ok := v.([]any)
+		if !ok {
+			return nil, nil, false, errors.New("labels must be an array of strings")
+		}
+		for i, e := range raw {
+			s, ok := e.(string)
+			if !ok {
+				return nil, nil, false, fmt.Errorf("labels[%d] must be a string", i)
+			}
+			labels = append(labels, s)
 		}
 	}
 	var includeBody bool
 	if v, ok := args["include_body"]; ok && v != nil {
 		b, ok := v.(bool)
 		if !ok {
-			return nil, false, errors.New("include_body must be a boolean")
+			return nil, nil, false, errors.New("include_body must be a boolean")
 		}
 		includeBody = b
 	}
-	return statuses, includeBody, nil
+	return statuses, labels, includeBody, nil
 }
 
 // validateBacklogStatus checks a status string against the BacklogStatus
@@ -317,22 +338,43 @@ func validateBacklogStatus(s string) (model.BacklogStatus, error) {
 	}
 }
 
-// filterAndProjectBacklog applies the optional status filter and, when
-// includeBody is false, strips `Body` from each returned item.
+// filterAndProjectBacklog applies the optional status + labels filters
+// and, when includeBody is false, strips `Body` from each returned item.
+//
+// Labels filter is any-overlap: an item matches when at least one of
+// its labels is in the filter set (case-sensitive). Items with no
+// labels never match a non-empty labels filter. Empty/nil labels
+// filter matches everything.
 //
 // Default-drop-body is the projection that keeps `list_backlog`
 // responses under the harness tool-output cap on real ideas (the
 // driver behind backlog item e1d17b25). Callers that need bodies
 // opt in via include_body=true.
-func filterAndProjectBacklog(items []model.BacklogItem, statuses []model.BacklogStatus, includeBody bool) []model.BacklogItem {
+func filterAndProjectBacklog(items []model.BacklogItem, statuses []model.BacklogStatus, labels []string, includeBody bool) []model.BacklogItem {
 	statusSet := make(map[model.BacklogStatus]struct{}, len(statuses))
 	for _, s := range statuses {
 		statusSet[s] = struct{}{}
+	}
+	labelSet := make(map[string]struct{}, len(labels))
+	for _, l := range labels {
+		labelSet[l] = struct{}{}
 	}
 	out := make([]model.BacklogItem, 0, len(items))
 	for _, item := range items {
 		if len(statusSet) > 0 {
 			if _, ok := statusSet[item.Status]; !ok {
+				continue
+			}
+		}
+		if len(labelSet) > 0 {
+			hit := false
+			for _, l := range item.Labels {
+				if _, ok := labelSet[l]; ok {
+					hit = true
+					break
+				}
+			}
+			if !hit {
 				continue
 			}
 		}

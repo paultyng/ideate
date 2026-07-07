@@ -60,7 +60,7 @@ func TestFilterAndProjectBacklog(t *testing.T) {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := filterAndProjectBacklog(items, c.statuses, c.includeBody)
+			got := filterAndProjectBacklog(items, c.statuses, nil, c.includeBody)
 			if len(got) != len(c.wantIDs) {
 				t.Fatalf("len = %d, want %d (got %+v)", len(got), len(c.wantIDs), got)
 			}
@@ -73,6 +73,157 @@ func TestFilterAndProjectBacklog(t *testing.T) {
 				}
 				if !c.wantBodies && got[i].Body != "" {
 					t.Errorf("[%d] body present but include_body=false (id=%s, body=%q)", i, got[i].ID, got[i].Body)
+				}
+			}
+		})
+	}
+}
+
+// TestFilterAndProjectBacklog_LabelsFilter covers the any-overlap
+// labels filter. An item passes when at least one of its labels is
+// in the filter set (case-sensitive). Empty/nil filter → all items.
+// Item with no labels → never matches a non-empty filter.
+func TestFilterAndProjectBacklog_LabelsFilter(t *testing.T) {
+	t.Parallel()
+
+	items := []model.BacklogItem{
+		{ID: "a", Title: "quick-win item", Status: model.BacklogStatusOpen, Labels: []string{"quick-win"}},
+		{ID: "b", Title: "nit + quick-win", Status: model.BacklogStatusOpen, Labels: []string{"nit", "quick-win"}},
+		{ID: "c", Title: "blocked", Status: model.BacklogStatusOpen, Labels: []string{"blocked-external"}},
+		{ID: "d", Title: "no labels", Status: model.BacklogStatusOpen},
+	}
+
+	cases := []struct {
+		name    string
+		labels  []string
+		wantIDs []string
+	}{
+		{
+			name:    "nil labels matches everything",
+			labels:  nil,
+			wantIDs: []string{"a", "b", "c", "d"},
+		},
+		{
+			name:    "empty labels matches everything",
+			labels:  []string{},
+			wantIDs: []string{"a", "b", "c", "d"},
+		},
+		{
+			name:    "single label narrows to overlap",
+			labels:  []string{"quick-win"},
+			wantIDs: []string{"a", "b"},
+		},
+		{
+			name:    "multi-label OR across set",
+			labels:  []string{"quick-win", "blocked-external"},
+			wantIDs: []string{"a", "b", "c"},
+		},
+		{
+			name:    "case-sensitive miss",
+			labels:  []string{"Quick-Win"},
+			wantIDs: nil,
+		},
+		{
+			name:    "unknown label matches nothing",
+			labels:  []string{"nonexistent"},
+			wantIDs: nil,
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := filterAndProjectBacklog(items, nil, c.labels, false)
+			if len(got) != len(c.wantIDs) {
+				t.Fatalf("len = %d, want %d (got %+v)", len(got), len(c.wantIDs), got)
+			}
+			for i, id := range c.wantIDs {
+				if got[i].ID != id {
+					t.Errorf("[%d] id = %q, want %q", i, got[i].ID, id)
+				}
+			}
+		})
+	}
+}
+
+// TestFilterAndProjectBacklog_LabelsAndStatusCompose confirms the two
+// filters AND together — an item must pass both status AND labels to
+// survive.
+func TestFilterAndProjectBacklog_LabelsAndStatusCompose(t *testing.T) {
+	t.Parallel()
+
+	items := []model.BacklogItem{
+		{ID: "a", Status: model.BacklogStatusOpen, Labels: []string{"quick-win"}},
+		{ID: "b", Status: model.BacklogStatusInProgress, Labels: []string{"quick-win"}},
+		{ID: "c", Status: model.BacklogStatusOpen, Labels: []string{"nit"}},
+	}
+	got := filterAndProjectBacklog(items,
+		[]model.BacklogStatus{model.BacklogStatusOpen},
+		[]string{"quick-win"},
+		false,
+	)
+	if len(got) != 1 || got[0].ID != "a" {
+		t.Errorf("got %+v, want single item id=a", got)
+	}
+}
+
+// TestParseListBacklogArgs_Labels covers the new labels parse path
+// alongside its error cases. Complements the status-focused
+// TestParseListBacklogArgs above.
+func TestParseListBacklogArgs_Labels(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		args       map[string]any
+		wantLabels []string
+		wantErr    string
+	}{
+		{
+			name:       "single label",
+			args:       map[string]any{"labels": []any{"quick-win"}},
+			wantLabels: []string{"quick-win"},
+		},
+		{
+			name:       "multi label",
+			args:       map[string]any{"labels": []any{"quick-win", "nit"}},
+			wantLabels: []string{"quick-win", "nit"},
+		},
+		{
+			name: "labels=null is treated as omitted",
+			args: map[string]any{"labels": nil},
+		},
+		{
+			name:    "labels not an array",
+			args:    map[string]any{"labels": "quick-win"},
+			wantErr: "labels must be an array of strings",
+		},
+		{
+			name:    "labels element not a string",
+			args:    map[string]any{"labels": []any{1}},
+			wantErr: "labels[0] must be a string",
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			_, gotLabels, _, err := parseListBacklogArgs(c.args)
+			if c.wantErr != "" {
+				if err == nil || err.Error() != c.wantErr {
+					t.Fatalf("err = %v, want %q", err, c.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if len(gotLabels) != len(c.wantLabels) {
+				t.Fatalf("labels len = %d, want %d (got %v)", len(gotLabels), len(c.wantLabels), gotLabels)
+			}
+			for i, l := range c.wantLabels {
+				if gotLabels[i] != l {
+					t.Errorf("labels[%d] = %q, want %q", i, gotLabels[i], l)
 				}
 			}
 		})
@@ -118,7 +269,7 @@ func TestFilterAndProjectBacklog_DoesNotMutateInput(t *testing.T) {
 	items := []model.BacklogItem{
 		{ID: "a", Status: model.BacklogStatusOpen, Body: "keep-me"},
 	}
-	_ = filterAndProjectBacklog(items, nil, false)
+	_ = filterAndProjectBacklog(items, nil, nil, false)
 	if items[0].Body != "keep-me" {
 		t.Errorf("input body mutated; got %q, want %q", items[0].Body, "keep-me")
 	}
@@ -187,7 +338,7 @@ func TestParseListBacklogArgs(t *testing.T) {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			gotStatus, gotInclude, err := parseListBacklogArgs(c.args)
+			gotStatus, _, gotInclude, err := parseListBacklogArgs(c.args)
 			if c.wantErr != "" {
 				if err == nil || err.Error() != c.wantErr {
 					t.Fatalf("err = %v, want %q", err, c.wantErr)
