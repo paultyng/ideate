@@ -34,6 +34,28 @@ func (e *ErrDirtyRepos) Error() string {
 	return fmt.Sprintf("uncommitted changes in: %s", strings.Join(e.Repos, ", "))
 }
 
+// ErrOpenBacklogItems is returned by Archive when the idea still has
+// open or in-progress backlog items and force was not set. The
+// caller (MCP handler / UI) can render the titles + count so the
+// human knows what they'd bury, then re-invoke with force=true.
+//
+// Titles are capped to a small slice (10) so the error message stays
+// bounded regardless of backlog size; Count carries the true total.
+type ErrOpenBacklogItems struct {
+	Titles []string
+	Count  int
+}
+
+func (e *ErrOpenBacklogItems) Error() string {
+	if e.Count == 1 {
+		return fmt.Sprintf("1 open backlog item: %s", e.Titles[0])
+	}
+	if len(e.Titles) < e.Count {
+		return fmt.Sprintf("%d open backlog items (first %d: %s, …)", e.Count, len(e.Titles), strings.Join(e.Titles, ", "))
+	}
+	return fmt.Sprintf("%d open backlog items: %s", e.Count, strings.Join(e.Titles, ", "))
+}
+
 // Store is the interface for idea persistence.
 type Store interface {
 	List(ctx context.Context) ([]model.Idea, error)

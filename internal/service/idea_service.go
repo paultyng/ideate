@@ -267,7 +267,31 @@ func (s *IdeaService) Archive(ctx context.Context, slug string, force bool) (*mo
 		return nil, &store.ErrDirtyRepos{Repos: dirty}
 	}
 
-	// (d) All gates passed — mutate in order: stop sessions, release repos, flip status.
+	// (d) Collect open/in-progress backlog items — gate only. The
+	// backlog is the idea's durable memory of in-flight work;
+	// archiving without acknowledging it strips that memory silently.
+	// Titles are capped to 10 so the error message stays bounded on
+	// runaway backlogs; the caller uses Count to render the full total.
+	items, err := s.store.ListBacklog(ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("listing backlog: %w", err)
+	}
+	var openTitles []string
+	openCount := 0
+	for _, it := range items {
+		if it.Status != model.BacklogStatusOpen && it.Status != model.BacklogStatusInProgress {
+			continue
+		}
+		openCount++
+		if len(openTitles) < 10 {
+			openTitles = append(openTitles, it.Title)
+		}
+	}
+	if openCount > 0 && !force {
+		return nil, &store.ErrOpenBacklogItems{Titles: openTitles, Count: openCount}
+	}
+
+	// (e) All gates passed — mutate in order: stop sessions, release repos, flip status.
 	for _, uuid := range running {
 		if stopErr := s.coord.Stop(ctx, uuid); stopErr != nil {
 			slog.Warn("stopping session during archive",
