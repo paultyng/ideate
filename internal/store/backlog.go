@@ -141,6 +141,9 @@ func (s *FSStore) UpdateBacklogItem(ctx context.Context, slug, id string, patch 
 	if patch.Affects != nil {
 		target.Affects = append([]string(nil), patch.Affects...)
 	}
+	if patch.Labels != nil {
+		target.Labels = append([]string(nil), patch.Labels...)
+	}
 	target.Updated = time.Now().UTC()
 	return s.writeBacklog(slug, items)
 }

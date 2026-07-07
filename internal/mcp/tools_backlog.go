@@ -65,7 +65,7 @@ func addBacklogItemsTool() mcp.Tool {
 			Properties: map[string]any{
 				"items": map[string]any{
 					"type":        "array",
-					"description": "One or more backlog items to add. Each must carry `title`; `body`, `status`, `depends_on`, `affects` are optional.",
+					"description": "One or more backlog items to add. Each must carry `title`; `body`, `status`, `depends_on`, `affects`, `labels` are optional.",
 					"items":       backlogItemInputSchema(),
 				},
 			},
@@ -83,7 +83,7 @@ func updateBacklogItemsTool() mcp.Tool {
 			Properties: map[string]any{
 				"patches": map[string]any{
 					"type":        "array",
-					"description": "One or more patches. Each must carry `id` plus at least one of `title`, `body`, `status`, `depends_on`, `affects`. Slice fields replace; `[]` clears; omit to leave unchanged.",
+					"description": "One or more patches. Each must carry `id` plus at least one of `title`, `body`, `status`, `depends_on`, `affects`, `labels`. Slice fields replace; `[]` clears; omit to leave unchanged.",
 					"items":       backlogPatchInputSchema(),
 				},
 			},
@@ -189,6 +189,11 @@ func backlogItemInputSchema() map[string]any {
 				"items":       map[string]any{"type": "string"},
 				"description": "File paths this item is expected to touch, relative to the idea root. Enables subagent parallelization on non-overlapping sets.",
 			},
+			"labels": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Free-form string tags for triage (e.g. \"quick-win\", \"blocked-external\", \"nit\"). Case-sensitive. list_backlog's labels filter matches on any-overlap.",
+			},
 			"external_url": map[string]any{
 				"type":        "string",
 				"description": "Upstream tracker URL the item mirrors — GitHub issue, Jira ticket, Todoist task, etc. Both the navigation target and the canonical sync identity. Empty for local-only items.",
@@ -213,6 +218,11 @@ func backlogPatchInputSchema() map[string]any {
 			"affects": map[string]any{
 				"type":  "array",
 				"items": map[string]any{"type": "string"},
+			},
+			"labels": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Replaces the item's labels. Pass `[]` to clear; omit to leave unchanged.",
 			},
 			"external_url": map[string]any{
 				"type":        "string",
@@ -460,6 +470,9 @@ func (m *Manager) addBacklogItemsBulk(
 		if affects, ok := stringSliceFromMap(fields, "affects"); ok {
 			item.Affects = affects
 		}
+		if labels, ok := stringSliceFromMap(fields, "labels"); ok {
+			item.Labels = labels
+		}
 		stored = append(stored, item)
 	}
 
@@ -540,7 +553,10 @@ func (m *Manager) updateBacklogItemsBulk(
 		if affects, ok := stringSliceFromMap(fields, "affects"); ok {
 			patch.Affects = affects
 		}
-		if patch.Title == "" && patch.Body == "" && patch.Status == "" && patch.ExternalURL == "" && patch.DependsOn == nil && patch.Affects == nil {
+		if labels, ok := stringSliceFromMap(fields, "labels"); ok {
+			patch.Labels = labels
+		}
+		if patch.Title == "" && patch.Body == "" && patch.Status == "" && patch.ExternalURL == "" && patch.DependsOn == nil && patch.Affects == nil && patch.Labels == nil {
 			results = append(results, result{ID: id, Status: "error", Error: "no fields supplied"})
 			continue
 		}
