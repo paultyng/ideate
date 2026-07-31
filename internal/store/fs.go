@@ -281,10 +281,21 @@ func (s *FSStore) Create(_ context.Context, idea *model.Idea) error {
 		return fmt.Errorf("writing idea.md: %w", err)
 	}
 
-	return s.appendHistory(slug, model.HistoryEvent{
+	if err := s.appendHistory(slug, model.HistoryEvent{
 		Timestamp: now,
 		Event:     "created",
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Best-effort: an index-gen failure must not fail the idea write. The
+	// listing is a derived, fully-regenerable artifact — the next write
+	// reconciles it.
+	if err := s.regenerateIndexes(); err != nil {
+		slog.Warn("regenerating okf indexes after create",
+			slog.String("slug", slug), slog.Any("err", err))
+	}
+	return nil
 }
 
 // deriveCreateSlug picks the directory name for a freshly-created idea.
@@ -351,10 +362,20 @@ func (s *FSStore) updateUnlocked(_ context.Context, idea *model.Idea) error {
 		return fmt.Errorf("writing idea.md: %w", err)
 	}
 
-	return s.appendHistory(idea.Slug, model.HistoryEvent{
+	if err := s.appendHistory(idea.Slug, model.HistoryEvent{
 		Timestamp: idea.Updated,
 		Event:     "updated",
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Best-effort: see Create. Covers update, archive, pause/resume, and
+	// resource edits — all persist through updateUnlocked.
+	if err := s.regenerateIndexes(); err != nil {
+		slog.Warn("regenerating okf indexes after update",
+			slog.String("slug", idea.Slug), slog.Any("err", err))
+	}
+	return nil
 }
 
 // AddResource upserts res into the idea identified by slug. It delegates
@@ -505,7 +526,8 @@ func (s *FSStore) ListRepoFiles(_ context.Context, slug, repoName string) ([]str
 	return files, nil
 }
 
-// ListFiles returns .md files in the idea directory, excluding idea.md.
+// ListFiles returns .md files in the idea directory, excluding idea.md and
+// the generated OKF index.md.
 func (s *FSStore) ListFiles(_ context.Context, slug string) ([]string, error) {
 	dir := s.ideaDir(slug)
 	entries, err := os.ReadDir(dir)
@@ -515,7 +537,7 @@ func (s *FSStore) ListFiles(_ context.Context, slug string) ([]string, error) {
 
 	var files []string
 	for _, e := range entries {
-		if e.IsDir() || e.Name() == ideaFilename || !strings.HasSuffix(e.Name(), ".md") {
+		if e.IsDir() || e.Name() == ideaFilename || e.Name() == indexFilename || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
 		files = append(files, e.Name())
