@@ -1,6 +1,6 @@
 module github.com/paultyng/ideate
 
-go 1.26.3
+go 1.26.4
 
 require (
 	connectrpc.com/connect v1.20.0
@@ -11,6 +11,7 @@ require (
 	github.com/go-git/go-git/v6 v6.0.0-alpha.4
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.55.0
+	github.com/paultyng/go-okf v0.1.0-beta.3
 	github.com/spf13/cobra v1.10.2
 	github.com/wailsapp/wails/v2 v2.12.0
 	google.golang.org/protobuf v1.36.11
@@ -75,6 +76,7 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	github.com/yuin/goldmark v1.8.4 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/net v0.55.0 // indirect
