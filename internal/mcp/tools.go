@@ -158,8 +158,8 @@ func (m *Manager) handleGetIdea(sessionID string) server.ToolHandlerFunc {
 			"updated":   idea.Updated,
 			"resources": idea.Resources,
 		}
-		if idea.Summary != "" {
-			view["summary"] = idea.Summary
+		if idea.Body != "" {
+			view["summary"] = idea.Body
 		}
 
 		data, err := json.MarshalIndent(view, "", "  ")
@@ -285,7 +285,7 @@ func (m *Manager) handleUpdateIdea(sessionID string) server.ToolHandlerFunc {
 			changes = append(changes, "name="+s)
 		}
 		if s := request.GetString("summary", ""); s != "" {
-			idea.Summary = s
+			idea.Body = s
 			changes = append(changes, "summary updated")
 		}
 
@@ -1037,9 +1037,9 @@ func (m *Manager) handleCreateIdea(sessionID string) server.ToolHandlerFunc {
 				"invalid status %q; allowed values: active, paused, archived", status)), nil
 		}
 		idea := &model.Idea{
-			Name:    name,
-			Status:  model.Status(status),
-			Summary: request.GetString("summary", ""),
+			Name:   name,
+			Status: model.Status(status),
+			Body:   request.GetString("summary", ""),
 		}
 		if err := m.store.Create(ctx, idea); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("creating idea: %v", err)), nil
@@ -1198,7 +1198,7 @@ func (m *Manager) handleUpdateIdeaBySlug(sessionID string) server.ToolHandlerFun
 			changes = append(changes, "name="+v)
 		}
 		if v, present := optionalString(args, "summary"); present {
-			idea.Summary = v
+			idea.Body = v
 			if v == "" {
 				changes = append(changes, "summary cleared")
 			} else {

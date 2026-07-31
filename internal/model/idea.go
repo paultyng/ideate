@@ -29,7 +29,8 @@ type Idea struct {
 	PauseUntil *time.Time `yaml:"pause_until,omitempty" json:"pause_until,omitempty" ts_type:"string"`
 	Updated    time.Time  `yaml:"updated,omitempty" json:"updated,omitempty" ts_type:"string"`
 	Resources  []Resource `yaml:"resources,omitempty" json:"resources,omitempty"`
-	Summary    string     `yaml:"-" json:"summary,omitempty"`
+	// Body is the idea.md Markdown body (frontmatter is the rest of Idea).
+	Body string `yaml:"-" json:"summary,omitempty"`
 
 	// Description maps to the OKF concept's core `description` key.
 	Description string `yaml:"-" json:"description,omitempty"`

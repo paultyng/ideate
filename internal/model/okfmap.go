@@ -42,7 +42,7 @@ func conceptFromIdea(idea *Idea) *okf.Concept {
 	c.Type = ideaConceptType
 	c.Title = idea.Name
 	c.Description = idea.Description
-	c.Body = idea.Summary
+	c.Body = idea.Body
 	if !idea.Updated.IsZero() {
 		c.Generated = &okf.Actor{At: idea.Updated}
 	} else {
@@ -158,7 +158,7 @@ func ideaFromConcept(c *okf.Concept) *Idea {
 	idea := &Idea{
 		Name:        c.Title,
 		Description: c.Description,
-		Summary:     c.Body,
+		Body:        c.Body,
 		raw:         c,
 	}
 	if c.Generated != nil {

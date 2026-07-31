@@ -22,7 +22,7 @@ func TestIdeaConceptRoundTrip(t *testing.T) {
 			Created:     created,
 			Updated:     updated,
 			Status:      StatusArchived,
-			Summary:     "Body text.\n",
+			Body:        "Body text.\n",
 			Resources: []Resource{
 				{Type: "github_pr", URL: "https://github.com/foo/bar/pull/1", Label: "PR", Status: "approved"},
 			},
@@ -44,8 +44,8 @@ func TestIdeaConceptRoundTrip(t *testing.T) {
 		if got.Description != idea.Description {
 			t.Errorf("Description = %q, want %q", got.Description, idea.Description)
 		}
-		if got.Summary != idea.Summary {
-			t.Errorf("Summary = %q, want %q", got.Summary, idea.Summary)
+		if got.Body != idea.Body {
+			t.Errorf("Body = %q, want %q", got.Body, idea.Body)
 		}
 		if !got.Updated.Equal(idea.Updated) {
 			t.Errorf("Updated = %v, want %v", got.Updated, idea.Updated)
@@ -77,7 +77,7 @@ func TestIdeaConceptRoundTrip(t *testing.T) {
 			Updated:    updated,
 			Status:     StatusPaused,
 			PauseUntil: &pause,
-			Summary:    "Notes.\n",
+			Body:       "Notes.\n",
 		}
 
 		content, err := SerializeIdeaFile(idea)
@@ -189,8 +189,8 @@ func TestParseLegacyIdeaFile(t *testing.T) {
 	if idea.PauseUntil == nil || !idea.PauseUntil.Equal(pause) {
 		t.Errorf("PauseUntil = %v, want %v", idea.PauseUntil, pause)
 	}
-	if idea.Summary != "Legacy body.\n" {
-		t.Errorf("Summary = %q, want %q", idea.Summary, "Legacy body.\n")
+	if idea.Body != "Legacy body.\n" {
+		t.Errorf("Body = %q, want %q", idea.Body, "Legacy body.\n")
 	}
 }
 

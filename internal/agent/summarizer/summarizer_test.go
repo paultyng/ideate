@@ -132,9 +132,9 @@ func TestSummarizer_RegeneratesAndWritesSidecar(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
 	store.ideas["foo"] = &model.Idea{
-		Slug:    "foo",
-		Name:    "Foo",
-		Summary: "Original body text",
+		Slug: "foo",
+		Name: "Foo",
+		Body: "Original body text",
 	}
 	ended := time.Now().Add(-time.Hour)
 	store.sessions["foo"] = []model.AgentSession{{
@@ -177,10 +177,10 @@ func TestRegenerate_PassesAllPointersToGenerator(t *testing.T) {
 	store := newFakeStore()
 	ideasDir := "/ideas"
 	store.ideas["repo-idea"] = &model.Idea{
-		Slug:    "repo-idea",
-		Name:    "Repo Idea",
-		Status:  model.StatusActive,
-		Summary: "Body.",
+		Slug:   "repo-idea",
+		Name:   "Repo Idea",
+		Status: model.StatusActive,
+		Body:   "Body.",
 	}
 	store.repos["repo-idea"] = []ext_store.RepoLink{
 		{Name: "api", Path: "repos/api"},

@@ -30,7 +30,7 @@ import (
 
 // Store is the slice of the FSStore API the summarizer needs. Kept
 // minimal so tests can substitute a fake without standing up the
-// full store. Idea.Summary carries the idea.md body (per the
+// full store. Idea.Body carries the idea.md body (per the
 // existing model convention) — no separate body fetch needed.
 type Store interface {
 	Get(ctx context.Context, slug string) (*model.Idea, error)
@@ -252,7 +252,7 @@ func (s *Summarizer) regenerate(ctx context.Context, slug string) error {
 	if idea == nil {
 		return errors.New("idea not found")
 	}
-	body := idea.Summary
+	body := idea.Body
 
 	sessions, err := s.store.ListSessions(ctx, slug)
 	if err != nil {
