@@ -89,7 +89,7 @@ func TestHandleUpdateIdeaBySlug_NullVsEmpty(t *testing.T) {
 	t.Run("status field is rejected with pointer to lifecycle tools", func(t *testing.T) {
 		t.Parallel()
 		s := newFakeStore()
-		s.ideas["alpha"] = &model.Idea{Slug: "alpha", Name: "X", Status: model.StatusActive, Summary: ""}
+		s.ideas["alpha"] = &model.Idea{Slug: "alpha", Name: "X", Status: model.StatusActive, Body: ""}
 		m := NewManager(s, &fakeResolver{mapping: map[string]string{}}, nil)
 		req := mcp.CallToolRequest{}
 		req.Params.Arguments = map[string]any{"slug": "alpha", "status": "archived"}
@@ -117,10 +117,10 @@ func TestHandleUpdateIdeaBySlug_NullVsEmpty(t *testing.T) {
 			t.Parallel()
 			s := newFakeStore()
 			s.ideas["alpha"] = &model.Idea{
-				Slug:    "alpha",
-				Name:    tt.seedName,
-				Status:  tt.seedStatus,
-				Summary: tt.seedSummary,
+				Slug:   "alpha",
+				Name:   tt.seedName,
+				Status: tt.seedStatus,
+				Body:   tt.seedSummary,
 			}
 			m := NewManager(s, &fakeResolver{mapping: map[string]string{}}, nil)
 
@@ -154,8 +154,8 @@ func TestHandleUpdateIdeaBySlug_NullVsEmpty(t *testing.T) {
 			if got.Status != tt.wantStatus {
 				t.Errorf("status = %q, want %q", got.Status, tt.wantStatus)
 			}
-			if got.Summary != tt.wantSummary {
-				t.Errorf("summary = %q, want %q", got.Summary, tt.wantSummary)
+			if got.Body != tt.wantSummary {
+				t.Errorf("summary = %q, want %q", got.Body, tt.wantSummary)
 			}
 		})
 	}

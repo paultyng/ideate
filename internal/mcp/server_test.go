@@ -707,8 +707,8 @@ func TestUpdateIdea(t *testing.T) {
 	}
 
 	idea := store.ideas["test-idea"]
-	if idea.Summary != "Updated description" {
-		t.Errorf("summary = %q, want %q", idea.Summary, "Updated description")
+	if idea.Body != "Updated description" {
+		t.Errorf("summary = %q, want %q", idea.Body, "Updated description")
 	}
 }
 

@@ -216,8 +216,8 @@ func TestHTTPUpdateIdea(t *testing.T) {
 	}
 
 	idea := store.ideas["test-idea"]
-	if idea.Summary != "New summary" {
-		t.Errorf("summary = %q", idea.Summary)
+	if idea.Body != "New summary" {
+		t.Errorf("summary = %q", idea.Body)
 	}
 }
 

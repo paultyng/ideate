@@ -93,8 +93,8 @@ func TestParseIdeaFile(t *testing.T) {
 		if idea.Resources[0].Type != "github" {
 			t.Errorf("Resource type = %q, want %q", idea.Resources[0].Type, "github")
 		}
-		if idea.Summary != "This is the summary.\n" {
-			t.Errorf("Summary = %q, want %q", idea.Summary, "This is the summary.\n")
+		if idea.Body != "This is the summary.\n" {
+			t.Errorf("Body = %q, want %q", idea.Body, "This is the summary.\n")
 		}
 	})
 
@@ -109,8 +109,8 @@ func TestParseIdeaFile(t *testing.T) {
 		if idea.Name != "" {
 			t.Errorf("Name = %q, want empty", idea.Name)
 		}
-		if idea.Summary != "Just some text\n" {
-			t.Errorf("Summary = %q, want %q", idea.Summary, "Just some text\n")
+		if idea.Body != "Just some text\n" {
+			t.Errorf("Body = %q, want %q", idea.Body, "Just some text\n")
 		}
 	})
 }
@@ -119,9 +119,9 @@ func TestSerializeIdeaFile(t *testing.T) {
 	t.Parallel()
 
 	idea := &Idea{
-		Name:    "Test Idea",
-		Status:  StatusPaused,
-		Summary: "Some notes here.\n",
+		Name:   "Test Idea",
+		Status: StatusPaused,
+		Body:   "Some notes here.\n",
 		Resources: []Resource{
 			{Type: "jira", URL: "https://jira.example.com/browse/FOO-1"},
 		},
@@ -143,8 +143,8 @@ func TestSerializeIdeaFile(t *testing.T) {
 	if got.Status != idea.Status {
 		t.Errorf("Status = %q, want %q", got.Status, idea.Status)
 	}
-	if got.Summary != idea.Summary {
-		t.Errorf("Summary = %q, want %q", got.Summary, idea.Summary)
+	if got.Body != idea.Body {
+		t.Errorf("Body = %q, want %q", got.Body, idea.Body)
 	}
 	if len(got.Resources) != 1 {
 		t.Fatalf("Resources len = %d, want 1", len(got.Resources))

@@ -182,12 +182,12 @@ func (s *FSStore) List(_ context.Context) ([]model.Idea, error) {
 				idea.Created = t
 			}
 		}
-		// Trim Summary to a card-sized preview so the dashboard idea
+		// Trim Body to a card-sized preview so the dashboard idea
 		// cards can render a snippet without shipping the full body
 		// across IPC. The IdeaCard truncates further (140 chars after
 		// whitespace flattening); 600 raw bytes leaves slack for
 		// markdown/whitespace collapse.
-		idea.Summary = trimSummaryPreview(idea.Summary, 600)
+		idea.Body = trimSummaryPreview(idea.Body, 600)
 		ideas = append(ideas, *idea)
 	}
 
@@ -328,7 +328,7 @@ func (s *FSStore) updateUnlocked(_ context.Context, idea *model.Idea) error {
 	dir := s.ideaDir(idea.Slug)
 	ideaPath := filepath.Join(dir, ideaFilename)
 
-	// Read existing to preserve body if Summary unchanged.
+	// Read existing to preserve body if Body unchanged.
 	data, err := os.ReadFile(ideaPath)
 	if err != nil {
 		return fmt.Errorf("reading existing idea.md: %w", err)
@@ -338,8 +338,8 @@ func (s *FSStore) updateUnlocked(_ context.Context, idea *model.Idea) error {
 		return err
 	}
 
-	if idea.Summary == "" {
-		idea.Summary = existing.Summary
+	if idea.Body == "" {
+		idea.Body = existing.Body
 	}
 	idea.Updated = time.Now()
 
