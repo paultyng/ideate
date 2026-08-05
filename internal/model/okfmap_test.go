@@ -67,6 +67,43 @@ func TestIdeaConceptRoundTrip(t *testing.T) {
 		}
 	})
 
+	t.Run("generated distinct from updated", func(t *testing.T) {
+		t.Parallel()
+
+		// generated (OKF §5.2 content change) and updated (MRU / last write)
+		// are separate timestamps mapping to separate frontmatter keys; a
+		// round trip must keep them independent, not collapse one onto the
+		// other (the STALE-MASK bug was overloading a single timestamp).
+		generated := time.Date(2026, 2, 1, 9, 0, 0, 0, time.UTC)
+		updated := time.Date(2026, 6, 15, 18, 0, 0, 0, time.UTC)
+		idea := &Idea{
+			Name:        "Split Idea",
+			Description: "distinct timestamps",
+			Generated:   generated,
+			Updated:     updated,
+			Status:      StatusActive,
+			Body:        "Body.\n",
+		}
+
+		content, err := SerializeIdeaFile(idea)
+		if err != nil {
+			t.Fatalf("SerializeIdeaFile: %v", err)
+		}
+		if !strings.Contains(content, "generated:") {
+			t.Errorf("serialized output missing generated key; got:\n%s", content)
+		}
+		got, err := ParseIdeaFile(content)
+		if err != nil {
+			t.Fatalf("ParseIdeaFile: %v", err)
+		}
+		if !got.Generated.Equal(generated) {
+			t.Errorf("Generated = %v, want %v", got.Generated, generated)
+		}
+		if !got.Updated.Equal(updated) {
+			t.Errorf("Updated = %v, want %v", got.Updated, updated)
+		}
+	})
+
 	t.Run("paused", func(t *testing.T) {
 		t.Parallel()
 
@@ -440,8 +477,9 @@ func TestParseLegacyCreatedScalar(t *testing.T) {
 
 // TestConceptFromIdeaStripsLegacyStatus covers the strip guard in
 // conceptFromIdea: a document read from legacy frontmatter must re-serialize
-// OKF-native, with the legacy status/name/updated/pause_until keys removed so
-// it never re-parses as legacy.
+// OKF-native, with the legacy status/name/pause_until keys removed so it never
+// re-parses as legacy. The `updated` key is NOT a legacy trigger — it is the
+// producer-ext MRU timestamp — so it is preserved, not stripped.
 func TestConceptFromIdeaStripsLegacyStatus(t *testing.T) {
 	t.Parallel()
 
@@ -461,8 +499,8 @@ func TestConceptFromIdeaStripsLegacyStatus(t *testing.T) {
 	if strings.Contains(out, "\nname:") {
 		t.Errorf("legacy name key not stripped; got:\n%s", out)
 	}
-	if strings.Contains(out, "updated:") {
-		t.Errorf("legacy updated key not stripped; got:\n%s", out)
+	if !strings.Contains(out, "updated: 2026-04-01") {
+		t.Errorf("updated MRU ext not preserved; got:\n%s", out)
 	}
 	if strings.Contains(out, "pause_until:") {
 		t.Errorf("legacy pause_until key not stripped; got:\n%s", out)

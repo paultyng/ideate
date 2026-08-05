@@ -267,6 +267,11 @@ func (s *FSStore) Create(_ context.Context, idea *model.Idea) error {
 	if idea.Updated.IsZero() {
 		idea.Updated = now
 	}
+	if idea.Generated.IsZero() {
+		// A new idea is born with content; generated (OKF §5.2 content
+		// change) starts at creation.
+		idea.Generated = now
+	}
 
 	slug := s.deriveCreateSlug(idea.Name, now)
 	idea.Slug = slug
@@ -362,7 +367,18 @@ func (s *FSStore) updateUnlocked(_ context.Context, idea *model.Idea) error {
 	if idea.Body == "" {
 		idea.Body = existing.Body
 	}
-	idea.Updated = time.Now()
+	now := time.Now()
+	idea.Updated = now
+	// generated (OKF §5.2) tracks content change only: bump it when Body or
+	// Description actually changed, never on a metadata-only write (pause,
+	// archive, resource edit). The summarizer sweep keys off Generated, so a
+	// session-activity touch (TouchIdea, which doesn't route through here)
+	// must never advance it — otherwise it masks an unsummarized session.
+	if idea.Body != existing.Body || idea.Description != existing.Description {
+		idea.Generated = now
+	} else {
+		idea.Generated = existing.Generated
+	}
 
 	content, err := model.SerializeIdeaFile(idea)
 	if err != nil {
