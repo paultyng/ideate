@@ -71,7 +71,7 @@ func (i *Idea) IsPaused(today okf.Date) bool {
 		return false
 	}
 	until := okf.NewDate(i.PauseUntil.Year(), i.PauseUntil.Month(), i.PauseUntil.Day())
-	return today.Time.Before(until.Time)
+	return today.Before(until.Time)
 }
 
 // Resource links an idea to an external system.
