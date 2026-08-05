@@ -114,8 +114,19 @@ func bundleExclude(p string, d fs.DirEntry) bool {
 			return true
 		}
 	}
-	if d != nil && !d.IsDir() && !strings.HasSuffix(p, ".md") {
-		return true
+	if d != nil {
+		// Reject symlinks: os.DirFS follows them, so a *.md symlink whose
+		// target sits outside the bundle (in repos/, another idea, or off
+		// the tree entirely) would pull that target's content into the OKF
+		// view and into index.md. DirEntry.Type reflects the lstat mode
+		// (ReadDir/WalkDir don't follow), so the symlink is dropped at
+		// discovery and never opened.
+		if d.Type()&fs.ModeSymlink != 0 {
+			return true
+		}
+		if !d.IsDir() && !strings.HasSuffix(p, ".md") {
+			return true
+		}
 	}
 	return false
 }

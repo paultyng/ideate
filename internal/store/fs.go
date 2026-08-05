@@ -46,6 +46,12 @@ type FSStore struct {
 	// locks serializes in-process writers against the same idea's
 	// on-disk artifacts (idea.md, backlog.json). See lock.go.
 	locks *slugLockManager
+
+	// indexMu serializes whole-bundle index.md regeneration. Every idea
+	// write rewrites *all* index.md files, so two concurrent writes
+	// (holding different per-slug locks) would otherwise race and
+	// lost-update each other's snapshot. See regenerateIndexes.
+	indexMu sync.Mutex
 }
 
 // NewFSStore creates a new filesystem-backed store. ideasDir holds idea
