@@ -15,7 +15,12 @@ import (
 // It implements fs.FS + fs.ReadDirFS + fs.StatFS. Consumers that walk with
 // fs.WalkDir (which prefers ReadDirFS) never descend into or observe a
 // skipped path because ReadDir drops it; Open/Stat also apply the predicate
-// so a direct access to a skipped path reports fs.ErrNotExist.
+// so a direct access to a path-excluded target reports fs.ErrNotExist.
+// Caveat: predicate rules that inspect fs.DirEntry.Type (e.g. symlink
+// rejection) only fire on the ReadDir path — Open/Stat build the DirEntry via
+// fs.Stat, which follows symlinks, so a direct Open of a named symlink is not
+// blocked. This is sufficient here: okf.Load only reads paths it discovered
+// through WalkDir/ReadDir, where the symlink was already dropped.
 type filterFS struct {
 	under fs.FS
 	skip  func(path string, d fs.DirEntry) bool

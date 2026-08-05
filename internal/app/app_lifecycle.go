@@ -239,8 +239,8 @@ func (a *App) Startup(ctx context.Context) {
 	//     externally or that ran via claudesync) and so never had their
 	//     summary generated.
 	//   - Ideas whose summary lags because Ideate was offline during
-	//     the SessionEnd hook, or whose body got edited externally
-	//     (idea.Updated > summary.generated_at).
+	//     the SessionEnd hook (latest ended session is newer than
+	//     idea.Generated, the last content-change time — see NeedsRegeneration).
 	// Sweep runs every 3 hours while the app is up; cheap on the
 	// up-to-date case (one summary read + session list per idea, no
 	// runner spawn). Subprocess fan-out is bounded by the summarizer
