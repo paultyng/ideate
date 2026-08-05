@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/paultyng/ideate/internal/model"
 )
 
 // StaleStore is the slice of store ops needed by EnqueueStale +
-// NeedsRegeneration. A superset of Store: also reads sidecars and
-// lists ideas. Kept narrow so tests can substitute fakes.
+// NeedsRegeneration. A superset of Store: also lists ideas. Kept
+// narrow so tests can substitute fakes.
 type StaleStore interface {
 	Store
 	List(ctx context.Context) ([]model.Idea, error)
-	ReadSummary(ctx context.Context, slug string) (*model.Summary, error)
 }
 
 // Reason explains why an idea's summary needs regeneration. The
@@ -25,7 +25,6 @@ const (
 	ReasonFresh        Reason = "no sessions yet"
 	ReasonMissing      Reason = "missing"
 	ReasonNewerSession Reason = "newer session available"
-	ReasonNewerIdea    Reason = "idea updated since summary"
 	ReasonForce        Reason = "force"
 )
 
@@ -33,50 +32,49 @@ const (
 // and the App's periodic sweep. Returns (reason, true) when slug
 // should be re-summarized, ("", false) when it's up to date.
 //
+// The one-line summary now lives on the idea's Description; the
+// regenerate path bumps idea.Updated when it writes, so Updated
+// doubles as the last-generation timestamp for staleness.
+//
 // Stale conditions, in order:
 //
 //  1. force is true — always regen.
-//  2. No sidecar on disk — regen (use ReasonFresh when no sessions
+//  2. No description yet — regen (use ReasonFresh when no sessions
 //     exist either, ReasonMissing otherwise).
-//  3. The sidecar's SourceSessionUUID is older than the most recent
-//     ended session's UUID — a newer session has run.
-//  4. The idea's Updated timestamp is newer than the sidecar's
-//     GeneratedAt — the body was edited (externally or otherwise).
+//  3. The most recent ended session ended after the last generation
+//     (idea.Updated) — a newer session has run.
+//
+// External body edits are caught by the idea:changed debouncer, not
+// this gate — without a separate generated-at timestamp the sweep
+// can't distinguish a body edit from its own write.
 //
 // Errors propagate as-is for the caller to surface.
 func NeedsRegeneration(ctx context.Context, store StaleStore, idea model.Idea, force bool) (Reason, bool, error) {
 	if force {
 		return ReasonForce, true, nil
 	}
-	cur, err := store.ReadSummary(ctx, idea.Slug)
-	if err != nil {
-		return "", false, fmt.Errorf("reading summary for %s: %w", idea.Slug, err)
-	}
 	sessions, err := store.ListSessions(ctx, idea.Slug)
 	if err != nil {
 		return "", false, fmt.Errorf("listing sessions for %s: %w", idea.Slug, err)
 	}
-	latestUUID := ""
+	var latestEnded *time.Time
 	for _, s := range sessions {
 		if s.Ended == nil {
 			continue
 		}
 		// ListSessions returns by Started DESC; first ended record is
 		// the most recent terminated session.
-		latestUUID = s.UUID
+		latestEnded = s.Ended
 		break
 	}
-	if cur == nil {
-		if latestUUID == "" {
+	if idea.Description == "" {
+		if latestEnded == nil {
 			return ReasonFresh, true, nil
 		}
 		return ReasonMissing, true, nil
 	}
-	if cur.SourceSessionUUID != latestUUID {
+	if latestEnded != nil && latestEnded.After(idea.Updated) {
 		return ReasonNewerSession, true, nil
-	}
-	if !idea.Updated.IsZero() && idea.Updated.After(cur.GeneratedAt) {
-		return ReasonNewerIdea, true, nil
 	}
 	return "", false, nil
 }

@@ -99,7 +99,7 @@ var (
 // concepts are the per-idea idea.md/context/*.md files plus reserved
 // index.md; the same tree also holds git worktrees (repos/), session JSON
 // (sessions/), backups (.backups/), and root JSON/JSONL sidecars
-// (config.json, history.jsonl, backlog.json, summary.json). go-okf's Load
+// (config.json, history.jsonl, backlog.json). go-okf's Load
 // must see none of that, so bundleExclude skips any path with a segment in
 // the excluded-directory set, plus any regular file that is not a *.md
 // concept. d may be nil; the segment rule needs only the path.

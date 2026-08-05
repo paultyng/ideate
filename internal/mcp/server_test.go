@@ -38,11 +38,6 @@ type fakeStore struct {
 	// tools (`list_sessions`, `get_session`).
 	sessions map[string][]model.AgentSession
 
-	// summaries maps slug → headless summary sidecar. nil = no
-	// sidecar; tests opt in by setting a value to exercise the
-	// idea_summary inline field on list_sessions.
-	summaries map[string]*model.Summary
-
 	// backlog maps slug → ordered items. Mirrors the real store's
 	// oldest-first append behavior.
 	backlog map[string][]model.BacklogItem
@@ -168,17 +163,6 @@ func (s *fakeStore) DeleteBacklogItem(_ context.Context, slug, id string) (bool,
 		return true, nil
 	}
 	return false, nil
-}
-
-func (s *fakeStore) ReadSummary(_ context.Context, slug string) (*model.Summary, error) {
-	if s.summaries == nil {
-		return nil, fmt.Errorf("no summary for %q", slug)
-	}
-	sum, ok := s.summaries[slug]
-	if !ok {
-		return nil, fmt.Errorf("no summary for %q", slug)
-	}
-	return sum, nil
 }
 
 func (s *fakeStore) ListSessions(_ context.Context, slug string) ([]model.AgentSession, error) {
