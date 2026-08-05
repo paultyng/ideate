@@ -21,7 +21,6 @@ import (
 const (
 	ideaFilename          = "idea.md"
 	historyFile           = "history.jsonl"
-	summaryFile           = "summary.json"
 	backlogFile           = "backlog.json"
 	reposDir              = "repos"
 	sessionsDir           = "sessions"
@@ -182,12 +181,17 @@ func (s *FSStore) List(_ context.Context) ([]model.Idea, error) {
 				idea.Created = t
 			}
 		}
-		// Trim Body to a card-sized preview so the dashboard idea
-		// cards can render a snippet without shipping the full body
-		// across IPC. The IdeaCard truncates further (140 chars after
-		// whitespace flattening); 600 raw bytes leaves slack for
-		// markdown/whitespace collapse.
-		idea.Body = trimSummaryPreview(idea.Body, 600)
+		// Card preview (serialized as `summary`): prefer the generated
+		// one-line Description; fall back to a card-sized body trim when
+		// no description exists yet. Trimming keeps the dashboard from
+		// shipping the full body across IPC. The IdeaCard truncates
+		// further (140 chars after whitespace flattening); 600 raw bytes
+		// leaves slack for markdown/whitespace collapse.
+		if idea.Description != "" {
+			idea.Body = idea.Description
+		} else {
+			idea.Body = trimSummaryPreview(idea.Body, 600)
+		}
 		ideas = append(ideas, *idea)
 	}
 
@@ -862,40 +866,6 @@ func (s *FSStore) UpdateSession(ctx context.Context, slug, key string, session m
 	return s.WriteSession(ctx, slug, key, session)
 }
 
-// ReadSummary loads the idea's headless-generated summary sidecar.
-// Returns (nil, nil) when no sidecar exists yet — that's the empty
-// state, not an error.
-func (s *FSStore) ReadSummary(_ context.Context, slug string) (*model.Summary, error) {
-	p := filepath.Join(s.ideaDir(slug), summaryFile)
-	data, err := os.ReadFile(p)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading summary: %w", err)
-	}
-	var sum model.Summary
-	if err := json.Unmarshal(data, &sum); err != nil {
-		return nil, fmt.Errorf("parsing summary: %w", err)
-	}
-	return &sum, nil
-}
-
-// WriteSummary persists the idea's headless-generated summary
-// sidecar. Atomic; safe to call concurrently with ReadSummary.
-func (s *FSStore) WriteSummary(_ context.Context, slug string, sum model.Summary) error {
-	p := filepath.Join(s.ideaDir(slug), summaryFile)
-	data, err := json.MarshalIndent(sum, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling summary: %w", err)
-	}
-	data = append(data, '\n')
-	if err := atomicfile.Write(p, data, 0o644); err != nil {
-		return fmt.Errorf("writing summary: %w", err)
-	}
-	return nil
-}
-
 // SetSessionReviewActive sets ActiveReviewID and Activity=reviewing on a
 // running session record. Returns an error if the session isn't running.
 func (s *FSStore) SetSessionReviewActive(ctx context.Context, slug, uuid, reviewID string) error {
@@ -952,10 +922,11 @@ func (s *FSStore) FindRunningSession(ctx context.Context, slug, agentType string
 // quick-jump when nothing is running. Cheap to compute in batch — one disk
 // scan per idea, surfaced via ListSessionSummaries below.
 //
-// IdeaSummary is the headless-generated summary sidecar (model.Summary)
-// when one exists on disk. The dashboard prefers this over the
-// truncated idea body for the card's primary line. Nil when no
-// sidecar exists yet (fresh idea, or before the first sweep).
+// IdeaSummary is the headless-generated one-line description of the
+// idea (idea.Description). The dashboard prefers this over the
+// truncated idea body for the card's primary line. Empty when no
+// description has been generated yet (fresh idea, or before the first
+// sweep).
 type IdeaSessionSummary struct {
 	Slug         string               `json:"slug"`
 	RunningCount int                  `json:"runningCount"`
@@ -967,7 +938,7 @@ type IdeaSessionSummary struct {
 	Dormant     []model.AgentSession             `json:"dormant,omitempty"`
 	MostRecent  *model.AgentSession              `json:"mostRecent,omitempty"`
 	ByAgent     map[string]model.SessionActivity `json:"byAgent,omitempty"`
-	IdeaSummary *model.Summary                   `json:"ideaSummary,omitempty"`
+	IdeaSummary string                           `json:"ideaSummary,omitempty"`
 	// RepoNames are the short names of linked worktrees under
 	// <idea>/repos/, sorted lexicographically. Computed via a
 	// directory scan only (no git probing) so the dashboard's
@@ -1031,12 +1002,9 @@ func (s *FSStore) ListSessionSummaries(ctx context.Context) ([]IdeaSessionSummar
 		if len(byAgent) > 0 {
 			summary.ByAgent = byAgent
 		}
-		// Best-effort sidecar read. A missing file is the empty
-		// state; a parse failure leaves IdeaSummary nil so the card
-		// falls back to the truncated body.
-		if sum, err := s.ReadSummary(ctx, idea.Slug); err == nil {
-			summary.IdeaSummary = sum
-		}
+		// The one-line description, when generated. Empty leaves the
+		// card falling back to the truncated body.
+		summary.IdeaSummary = idea.Description
 		// Cheap repo-name scan: directory entries only, no git
 		// status. Names are the worktree dir basenames, which the
 		// LinkRepo flow already collapses to the canonical short

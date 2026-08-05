@@ -117,9 +117,7 @@ func (m *Manager) buildIdeaSummary(ctx context.Context, idea model.Idea, outputL
 	if !idea.Updated.IsZero() {
 		out.LastActivityAt = idea.Updated.Format(time.RFC3339Nano)
 	}
-	if sum, err := m.store.ReadSummary(ctx, idea.Slug); err == nil && sum != nil {
-		out.Summary = sum.Line
-	}
+	out.Summary = idea.Description
 
 	if items, err := m.store.ListBacklog(ctx, idea.Slug); err == nil {
 		for _, item := range items {
