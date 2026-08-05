@@ -298,7 +298,7 @@ export default function CommandPalette({ open, onClose }: Props) {
         const target = resolveSessionTarget(sessions)
         const running = target.kind === 'running' ? target.session : undefined
         const dormant = target.kind === 'dormant' ? target.session : undefined
-        const summaryLine = sessions?.ideaSummary?.line?.trim() || undefined
+        const summaryLine = sessions?.ideaSummary?.trim() || undefined
         const meta = running ? (
           <>
             <SessionStatusIcon status="running" activity={running.activity || 'idle'} />
