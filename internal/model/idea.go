@@ -35,6 +35,15 @@ type Idea struct {
 	// Description maps to the OKF concept's core `description` key.
 	Description string `yaml:"-" json:"description,omitempty"`
 
+	// Generated maps to the OKF concept's `generated.at` (v0.2 §5.2: "last
+	// content change"). It advances only when Body or Description actually
+	// change — never on a metadata-only write such as a session-activity
+	// touch (see store.TouchIdea). This is the distinction Updated lacks:
+	// Updated bumps on every write, so the summarizer's staleness sweep keys
+	// off Generated to tell "a session ended since we last summarized" apart
+	// from "something touched the idea". See store.updateUnlocked, okfmap.go.
+	Generated time.Time `yaml:"-" json:"generated,omitempty" ts_type:"string"`
+
 	// raw is the fully-parsed OKF concept this Idea was loaded from, if
 	// any (nil for a freshly-constructed Idea, e.g. from create_idea).
 	// conceptFromIdea clones it as the base for re-serialization before

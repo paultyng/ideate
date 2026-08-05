@@ -32,21 +32,31 @@ const (
 // and the App's periodic sweep. Returns (reason, true) when slug
 // should be re-summarized, ("", false) when it's up to date.
 //
-// The one-line summary now lives on the idea's Description; the
-// regenerate path bumps idea.Updated when it writes, so Updated
-// doubles as the last-generation timestamp for staleness.
+// The one-line summary lives on the idea's Description; the regenerate
+// path bumps idea.Generated (OKF §5.2 "last content change") when it
+// writes a changed line. Generated — unlike Updated — is NOT advanced by
+// a session-activity touch (store.TouchIdea), so it is the correct
+// staleness anchor: comparing it against the latest ended session tells
+// "a session ended since we last summarized" apart from "a session write
+// touched the idea". Using Updated here would be permanently masked,
+// because session-end touches Updated to a time >= the session's Ended
+// before this gate ever runs.
 //
 // Stale conditions, in order:
 //
 //  1. force is true — always regen.
 //  2. No description yet — regen (use ReasonFresh when no sessions
 //     exist either, ReasonMissing otherwise).
-//  3. The most recent ended session ended after the last generation
-//     (idea.Updated) — a newer session has run.
+//  3. The most recent ended session ended after the last content
+//     generation (idea.Generated) — a newer session has run.
 //
-// External body edits are caught by the idea:changed debouncer, not
-// this gate — without a separate generated-at timestamp the sweep
-// can't distinguish a body edit from its own write.
+// A summarizer run that produces an unchanged line skips the write (the
+// idea:changed recursion guard), so Generated does not advance; the
+// periodic sweep re-enqueues such a converged idea each cycle (every
+// summarySweepInterval). That is bounded, cheap for the default
+// generator, and the common case still converges because a new session
+// changes the transcript-derived line. External body edits are caught by
+// the idea:changed debouncer, not this gate.
 //
 // Errors propagate as-is for the caller to surface.
 func NeedsRegeneration(ctx context.Context, store StaleStore, idea model.Idea, force bool) (Reason, bool, error) {
@@ -73,7 +83,7 @@ func NeedsRegeneration(ctx context.Context, store StaleStore, idea model.Idea, f
 		}
 		return ReasonMissing, true, nil
 	}
-	if latestEnded != nil && latestEnded.After(idea.Updated) {
+	if latestEnded != nil && latestEnded.After(idea.Generated) {
 		return ReasonNewerSession, true, nil
 	}
 	return "", false, nil

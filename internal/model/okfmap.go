@@ -43,8 +43,10 @@ func conceptFromIdea(idea *Idea) *okf.Concept {
 	c.Title = idea.Name
 	c.Description = idea.Description
 	c.Body = idea.Body
-	if !idea.Updated.IsZero() {
-		c.Generated = &okf.Actor{At: idea.Updated}
+	// generated (OKF §5.2) = last content change. Distinct from updated
+	// (last write of any kind), which is an Ideate producer extension below.
+	if !idea.Generated.IsZero() {
+		c.Generated = &okf.Actor{At: idea.Generated}
 	} else {
 		c.Generated = nil
 	}
@@ -54,7 +56,7 @@ func conceptFromIdea(idea *Idea) *okf.Concept {
 	}
 
 	// A cloned raw concept may still carry legacy v0.1 artifacts (Extra
-	// name/updated/pause_until, core Status repurposed for our own
+	// name/pause_until, core Status repurposed for our own
 	// active/paused/archived vocabulary — see ideaFromConcept's
 	// hasLegacyName/hasLegacyStatus detection). Every field above and
 	// below is the OKF-native replacement for one of those, so strip the
@@ -62,11 +64,21 @@ func conceptFromIdea(idea *Idea) *okf.Concept {
 	// as legacy again, or the pause/archive dates it just got would be
 	// discarded next read in favor of stale legacy values.
 	delete(c.Extra, "name")
-	delete(c.Extra, "updated")
 	delete(c.Extra, "pause_until")
 	switch c.Status {
 	case string(StatusActive), string(StatusPaused), string(StatusArchived):
 		c.Status = ""
+	}
+
+	// updated (last write / MRU) is an Ideate producer extension, NOT an OKF
+	// core key: OKF has no "last modified" concept (generated = content
+	// change). It shares the "updated" key name with the legacy v0.1 form
+	// but is not a legacy trigger (only name + a repurposed lifecycle status
+	// route a doc through legacy parsing), so persisting it here is safe.
+	if !idea.Updated.IsZero() {
+		c.Extra["updated"] = idea.Updated
+	} else {
+		delete(c.Extra, "updated")
 	}
 
 	// Delete every lifecycle + created ext key from the clone, then
@@ -185,7 +197,15 @@ func ideaFromConcept(c *okf.Concept) *Idea {
 		raw:         c,
 	}
 	if c.Generated != nil {
-		idea.Updated = c.Generated.At
+		idea.Generated = c.Generated.At
+	}
+	// updated is an Ideate producer ext (last write / MRU), present in both
+	// the modern and legacy shapes. The legacy branch below also reads it,
+	// but reading here first covers the modern path uniformly.
+	if updatedRaw, ok := c.Extra["updated"]; ok {
+		if t, ok := parseLegacyTime(updatedRaw); ok {
+			idea.Updated = t
+		}
 	}
 
 	// "status" is an OKF core key (Concept.Status) with its own lifecycle
@@ -290,15 +310,9 @@ func parseLegacyIdeaFields(c *okf.Concept, idea *Idea) (*okf.Actor, *okf.Date) {
 		}
 	}
 
-	// "updated" is a legacy v0.1 key distinct from OKF's own `generated`/
-	// `timestamp` provenance keys, so it always lands in Extra and needs
-	// its own mapping.
-	if updatedRaw, ok := c.Extra["updated"]; ok {
-		if t, ok := parseLegacyTime(updatedRaw); ok {
-			idea.Updated = t
-		}
-	}
-
+	// idea.Updated is read uniformly in ideaFromConcept (from Extra["updated"],
+	// present in both shapes) before this legacy branch runs, so the archived/
+	// active_after derivation below can rely on it.
 	legacyStatus := c.Status
 
 	var legacyPauseUntil *time.Time
