@@ -87,6 +87,43 @@ func TestIndexGenerated(t *testing.T) {
 	}
 }
 
+// A *.md symlink inside an idea must be dropped from the bundle view: os.DirFS
+// follows symlinks, so without the DirEntry symlink check the target's content
+// would be ingested and rendered into index.md.
+func TestBundleExcludeSkipsSymlink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, dir := newTestStore(t)
+
+	idea := &model.Idea{Name: "Alpha Idea", Description: "First.", Body: "b\n"}
+	if err := s.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	const secret = "TOPSECRET-symlink-target-content"
+	secretPath := filepath.Join(dir, "secret-target.md")
+	if err := os.WriteFile(secretPath, []byte("# leak\n"+secret+"\n"), 0o644); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	linkPath := filepath.Join(dir, idea.Slug, "leak.md")
+	if err := os.Symlink(secretPath, linkPath); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if err := s.regenerateIndexes(); err != nil {
+		t.Fatalf("regenerateIndexes: %v", err)
+	}
+
+	ideaIdx := readFile(t, filepath.Join(dir, idea.Slug, indexFilename))
+	if strings.Contains(ideaIdx, "leak.md") || strings.Contains(ideaIdx, secret) {
+		t.Errorf("index.md leaked symlink target:\n%s", ideaIdx)
+	}
+	rootIdx := readFile(t, filepath.Join(dir, "index.md"))
+	if strings.Contains(rootIdx, secret) {
+		t.Errorf("root index.md leaked symlink target:\n%s", rootIdx)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

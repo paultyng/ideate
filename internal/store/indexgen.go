@@ -34,6 +34,13 @@ const indexFilename = "index.md"
 // For M1's idea counts that is fine; a per-directory dirty-cache is a later
 // item on the OKF milestone plan.
 func (s *FSStore) regenerateIndexes() error {
+	// Whole-bundle rebuild: serialize across all slugs so two concurrent
+	// idea writes don't lost-update each other's index.md snapshot. The
+	// per-slug lock the caller holds is not enough — every write rewrites
+	// every index.md.
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+
 	b, err := okf.Load(newFilterFS(os.DirFS(s.ideasDir), bundleExclude))
 	if err != nil {
 		return fmt.Errorf("loading okf bundle: %w", err)
