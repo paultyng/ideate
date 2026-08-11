@@ -1,11 +1,12 @@
-// Package summarizer regenerates idea-level summary sidecars from
+// Package summarizer regenerates an idea's one-line description from
 // the most recent session's transcript tail.
 //
 // A Summarizer owns a bounded worker pool that pulls slugs off an
 // in-memory queue, finds the slug's latest session, reads the last
 // few turns of that session's Claude transcript, feeds them through
 // a configurable [Generator] (deterministic snippet, headless Claude,
-// headless Codex, …), and persists the result via [Store.WriteSummary].
+// headless Codex, …), and persists the result onto the idea's
+// Description via [Store.Update].
 //
 // Triggers (SessionEnd hook, idea:changed debounce, periodic sweep)
 // live in callers — this package just owns the regenerate-one-idea
@@ -21,7 +22,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/paultyng/ideate/internal/agent/transcript/claudefmt"
 	"github.com/paultyng/ideate/internal/model"
@@ -30,7 +30,7 @@ import (
 
 // Store is the slice of the FSStore API the summarizer needs. Kept
 // minimal so tests can substitute a fake without standing up the
-// full store. Idea.Summary carries the idea.md body (per the
+// full store. Idea.Body carries the idea.md body (per the
 // existing model convention) — no separate body fetch needed.
 type Store interface {
 	Get(ctx context.Context, slug string) (*model.Idea, error)
@@ -39,10 +39,13 @@ type Store interface {
 	// summarizer can hand the agent absolute paths for `git log`
 	// research. May return (nil, nil) when no repos are linked.
 	ListRepos(ctx context.Context, slug string) ([]store.RepoLink, error)
-	WriteSummary(ctx context.Context, slug string, sum model.Summary) error
+	// Update persists the idea, including the regenerated Description
+	// (and bumping Updated). The concrete *service.IdeaService satisfies
+	// this.
+	Update(ctx context.Context, idea *model.Idea) error
 	// AddResource dedupes and persists a resource on the idea. The
 	// concrete *service.IdeaService already satisfies this; the summarizer
-	// calls it best-effort after writing the summary sidecar.
+	// calls it best-effort after updating the description.
 	AddResource(ctx context.Context, slug string, res model.Resource) error
 }
 
@@ -252,7 +255,7 @@ func (s *Summarizer) regenerate(ctx context.Context, slug string) error {
 	if idea == nil {
 		return errors.New("idea not found")
 	}
-	body := idea.Summary
+	body := idea.Body
 
 	sessions, err := s.store.ListSessions(ctx, slug)
 	if err != nil {
@@ -304,19 +307,16 @@ func (s *Summarizer) regenerate(ctx context.Context, slug string) error {
 		return nil
 	}
 
-	sum := model.Summary{
-		Line:        line,
-		GeneratedAt: time.Now().UTC(),
-	}
-	if latest != nil {
-		sum.SourceSessionUUID = latest.UUID
-		if latest.Ended != nil {
-			t := latest.Ended.UTC()
-			sum.SourceSessionEndedAt = &t
+	// Skip the write when the line is unchanged: an idea.md write emits
+	// idea:changed, which the debounced trigger would feed back into the
+	// summarizer — so a no-op write would loop. The deterministic default
+	// generator produces the same line for unchanged inputs, so this
+	// converges after one write.
+	if line != idea.Description {
+		idea.Description = line
+		if err := s.store.Update(ctx, idea); err != nil {
+			return fmt.Errorf("updating idea description: %w", err)
 		}
-	}
-	if err := s.store.WriteSummary(ctx, slug, sum); err != nil {
-		return fmt.Errorf("writing summary: %w", err)
 	}
 
 	// Apply suggested resources best-effort: log warn on failure but

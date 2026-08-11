@@ -34,9 +34,9 @@ const ideaChangedDebounce = 60 * time.Second
 // after a debounce. Owned by a goroutine spawned from startup; ctx
 // cancellation drains and exits.
 //
-// Recursion guard lives in the watcher: shouldIgnore filters
-// summary.json writes so the summarizer's own sidecar writes don't
-// re-trigger this loop.
+// Recursion guard lives in the summarizer: it skips the idea.md write
+// when the regenerated line is unchanged, so its own write doesn't
+// feed back through idea:changed into this loop.
 
 func (a *App) runIdeaChangedDebouncer() {
 	if a.summarizer == nil || a.events == nil {

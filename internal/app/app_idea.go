@@ -30,9 +30,9 @@ func (a *App) GetIdea(slug string) (*IdeaDetail, error) {
 
 func (a *App) CreateIdea(name string, status string, summary string) (string, error) {
 	idea := &model.Idea{
-		Name:    name,
-		Status:  model.Status(status),
-		Summary: summary,
+		Name:   name,
+		Status: model.Status(status),
+		Body:   summary,
 	}
 	if idea.Status == "" {
 		idea.Status = model.StatusPaused

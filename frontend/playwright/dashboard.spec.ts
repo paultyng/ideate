@@ -56,15 +56,16 @@ test.describe('Dashboard', () => {
     await expect(page.locator('.app-footer')).toContainText(/v\d|dev/)
   })
 
-  // Idea cards prefer the headless-generated summary sidecar (line
-  // from <slug>/summary.json) over the truncated idea.md body. Writes
-  // a sidecar directly to the ideas dir and asserts the card shows
-  // that text instead of the body's first 140 chars.
-  test('idea card renders the sidecar summary line when present', async ({ page }) => {
+  // Idea cards prefer the headless-generated one-line summary
+  // (idea.Description) over the truncated idea.md body. Seeds the
+  // description into the idea's frontmatter — summary.json was retired,
+  // the line now lives on the OKF `description` key — and asserts the
+  // card shows that text instead of the body's first 140 chars.
+  test('idea card renders the description summary line when present', async ({ page }) => {
     test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
 
-    const name = `Sidecar Summary Test ${Date.now()}`
-    const body = 'Original body that should NOT appear on the card once the sidecar is in place.'
+    const name = `Description Summary Test ${Date.now()}`
+    const body = 'Original body that should NOT appear on the card once the description is in place.'
     await page.goto('/')
     const slug = await page.evaluate(
       async ({ n, b }) => {
@@ -74,22 +75,19 @@ test.describe('Dashboard', () => {
       { n: name, b: body },
     )
 
-    const sidecarLine = 'Sidecar-generated summary that should appear on the card.'
-    await fs.writeFile(
-      path.join(ideasDir, slug, 'summary.json'),
-      JSON.stringify({
-        line: sidecarLine,
-        generated_at: new Date().toISOString(),
-      }),
-    )
+    const summaryLine = 'Headless-generated summary that should appear on the card.'
+    // Inject the OKF `description` key into the frontmatter CreateIdea
+    // wrote. YAML keys are order-independent, so prepending the key right
+    // after the opening fence preserves everything else (type/title/created).
+    const ideaMd = path.join(ideasDir, slug, 'idea.md')
+    const original = await fs.readFile(ideaMd, 'utf8')
+    await fs.writeFile(ideaMd, original.replace(/^---\n/, `---\ndescription: ${JSON.stringify(summaryLine)}\n`))
 
     const card = page.locator('.idea-card', { hasText: name })
     await expect(card).toBeVisible({ timeout: 5000 })
-    // Sidecar line wins. Poll because ListSessionSummaries refreshes
-    // on idea:changed + a 10s backstop interval; the sidecar write
-    // doesn't itself fire idea:changed, so we wait for the interval
-    // OR a navigation-driven refresh.
-    await expect(card.locator('.card-shell-summary')).toContainText(sidecarLine, { timeout: 15000 })
+    // Description wins over body. The idea.md write fires idea:changed,
+    // so ListSessionSummaries refreshes; poll to absorb the debounce.
+    await expect(card.locator('.card-shell-summary')).toContainText(summaryLine, { timeout: 15000 })
     await expect(card.locator('.card-shell-summary')).not.toContainText('Original body')
   })
 

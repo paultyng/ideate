@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	okf "github.com/paultyng/go-okf"
+)
 
 // Status represents the current state of an idea.
 type Status string
@@ -25,7 +29,49 @@ type Idea struct {
 	PauseUntil *time.Time `yaml:"pause_until,omitempty" json:"pause_until,omitempty" ts_type:"string"`
 	Updated    time.Time  `yaml:"updated,omitempty" json:"updated,omitempty" ts_type:"string"`
 	Resources  []Resource `yaml:"resources,omitempty" json:"resources,omitempty"`
-	Summary    string     `yaml:"-" json:"summary,omitempty"`
+	// Body is the idea.md Markdown body (frontmatter is the rest of Idea).
+	Body string `yaml:"-" json:"summary,omitempty"`
+
+	// Description maps to the OKF concept's core `description` key.
+	Description string `yaml:"-" json:"description,omitempty"`
+
+	// Generated maps to the OKF concept's `generated.at` (v0.2 §5.2: "last
+	// content change"). It advances only when Body or Description actually
+	// change — never on a metadata-only write such as a session-activity
+	// touch (see store.TouchIdea). This is the distinction Updated lacks:
+	// Updated bumps on every write, so the summarizer's staleness sweep keys
+	// off Generated to tell "a session ended since we last summarized" apart
+	// from "something touched the idea". See store.updateUnlocked, okfmap.go.
+	Generated time.Time `yaml:"-" json:"generated,omitempty" ts_type:"string"`
+
+	// raw is the fully-parsed OKF concept this Idea was loaded from, if
+	// any (nil for a freshly-constructed Idea, e.g. from create_idea).
+	// conceptFromIdea clones it as the base for re-serialization before
+	// overlaying the Ideate-managed fields above, so frontmatter keys
+	// Ideate doesn't model (producer extensions, unmodeled OKF core
+	// fields) survive a parse/serialize round trip. See okfmap.go.
+	raw *okf.Concept
+}
+
+// IsArchived reports whether the idea is archived. Status is the single
+// authoritative lifecycle field; the OKF `archived` ext key is derived from
+// it on save — see okfmap.go.
+func (i *Idea) IsArchived() bool {
+	return i.Status == StatusArchived
+}
+
+// IsPaused reports whether the idea is paused *right now* — today is before
+// PauseUntil (date-only comparison) — as opposed to Status, which answers the
+// coarser "is a pause configured at all". Auto-resurfacing (flipping Status to
+// active once PauseUntil elapses) is a later milestone, not M1: Status stays
+// "paused" until the idea is explicitly resumed, even after IsPaused(today)
+// goes false.
+func (i *Idea) IsPaused(today okf.Date) bool {
+	if i.PauseUntil == nil {
+		return false
+	}
+	until := okf.NewDate(i.PauseUntil.Year(), i.PauseUntil.Month(), i.PauseUntil.Day())
+	return today.Before(until.Time)
 }
 
 // Resource links an idea to an external system.

@@ -17,8 +17,8 @@ interface ActiveSession {
   // Parent idea's Updated timestamp; bumped on every session-activity hook
   // via TouchIdea, so it doubles as the session's last-activity signal.
   updated: string
-  // Parent idea's summary sidecar (one-sentence intent line) when present.
-  ideaSummary?: { line: string }
+  // Parent idea's one-line description (idea.Description) when present.
+  ideaSummary?: string
 }
 
 function agentLabel(agentType: string): string {

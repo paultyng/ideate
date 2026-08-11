@@ -39,11 +39,6 @@ type IdeaStore interface {
 	// orchestration tools (`list_sessions`, `get_session`).
 	ListSessions(ctx context.Context, slug string) ([]model.AgentSession, error)
 
-	// ReadSummary loads the headless-generated one-line summary sidecar
-	// for an idea. Returns (nil, error) when no sidecar exists yet —
-	// the caller treats that as "no summary available".
-	ReadSummary(ctx context.Context, slug string) (*model.Summary, error)
-
 	// Per-idea backlog. Mirrors the resources surface — items live
 	// in <slug>/backlog.json, sorted oldest-first on read.
 	ListBacklog(ctx context.Context, slug string) ([]model.BacklogItem, error)

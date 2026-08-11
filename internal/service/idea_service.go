@@ -445,18 +445,10 @@ func (s *IdeaService) ListRepoFiles(ctx context.Context, slug, repoName string) 
 	return s.store.ListRepoFiles(ctx, slug, repoName)
 }
 
-// History / summary
+// History
 
 func (s *IdeaService) ReadHistory(ctx context.Context, slug string) ([]model.HistoryEvent, error) {
 	return s.store.ReadHistory(ctx, slug)
-}
-
-func (s *IdeaService) ReadSummary(ctx context.Context, slug string) (*model.Summary, error) {
-	return s.store.ReadSummary(ctx, slug)
-}
-
-func (s *IdeaService) WriteSummary(ctx context.Context, slug string, sum model.Summary) error {
-	return s.store.WriteSummary(ctx, slug, sum)
 }
 
 // Session reads / writes

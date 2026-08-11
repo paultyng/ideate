@@ -36,20 +36,9 @@ func (a *App) ListActiveSessions() []ActiveSession {
 		if idea.Updated.IsZero() {
 			updated = ""
 		}
-		// One sidecar read per idea, only if the idea has at least one
-		// running or dormant session. Skips disk I/O for the common case
-		// of ideas with no surfaced work.
-		var ideaSummary *model.Summary
-		var summaryFetched bool
 		for _, s := range sessions {
 			if s.Status != model.SessionStatusRunning && s.Status != model.SessionStatusDormant {
 				continue
-			}
-			if !summaryFetched {
-				if sum, err := a.svc.ReadSummary(ctx, idea.Slug); err == nil {
-					ideaSummary = sum
-				}
-				summaryFetched = true
 			}
 			activity := string(s.Activity)
 			if activity == "" {
@@ -64,7 +53,7 @@ func (a *App) ListActiveSessions() []ActiveSession {
 				Activity:    activity,
 				Started:     s.Started.Format(time.RFC3339Nano),
 				Updated:     updated,
-				IdeaSummary: ideaSummary,
+				IdeaSummary: idea.Description,
 			})
 		}
 	}
