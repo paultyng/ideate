@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test'
 import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
-import { waitForAgentReady } from './ptyCapture'
+import { AGENT_LIFECYCLE_TIMEOUT_MS, waitForAgentReady } from './ptyCapture'
 
 // Demo specs produce the README's animated GIFs. Each test name maps
 // 1:1 to a `docs/media/<name>.gif` output via `task generate:demos`,
@@ -331,7 +331,7 @@ existing search infrastructure and avoids the dual-write footgun.
         }
         return false
       },
-      { timeout: 10000 },
+      { timeout: AGENT_LIFECYCLE_TIMEOUT_MS },
     )
 
     // Settle frame so the GIF starts on the dashboard + idle drawer.

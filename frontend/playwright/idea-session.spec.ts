@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { enablePtyCapture, getMountedSessionId, readSessionReplay, stopAllRunningSessions } from './ptyCapture'
+import {
+  AGENT_LIFECYCLE_TIMEOUT_MS,
+  enablePtyCapture,
+  getMountedSessionId,
+  readSessionReplay,
+  stopAllRunningSessions,
+} from './ptyCapture'
 
 // Helper: create an idea and return its slug from the URL.
 async function createIdea(page: import('@playwright/test').Page, name: string): Promise<string> {
@@ -83,7 +89,7 @@ async function waitForSessionEnd(page: import('@playwright/test').Page) {
   await page.keyboard.type('/exit', { delay: 50 })
   await page.keyboard.press('Enter')
   await expect(page.locator('.session-toolbar-status, .status-badge'))
-    .toContainText(/exited|stopped|completed/, { timeout: 10000 })
+    .toContainText(/exited|stopped|completed/, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS })
 }
 
 // Helper: expand the Sessions section if it's collapsed (default when
@@ -407,7 +413,7 @@ test.describe('Idea Session Flow', () => {
 
     // mcp-connected lifecycle marker — see waitForAgentReady's comment
     // for why this is the readiness signal instead of the banner text.
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
+    await expect.poll(readTerminalText, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS }).toContain('mcp connected:')
 
     await page.locator('.terminal-container').click()
     await page.keyboard.type('line1', { delay: 100 })
@@ -431,7 +437,7 @@ test.describe('Idea Session Flow', () => {
     await page.waitForSelector('.xterm-screen', { timeout: 5000 })
 
     const uuid = await getMountedSessionId(page)
-    await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 }).toContain('mcp connected:')
+    await expect.poll(() => readSessionReplay(page, uuid), { timeout: AGENT_LIFECYCLE_TIMEOUT_MS }).toContain('mcp connected:')
 
     await page.locator('.terminal-container').click()
     await page.keyboard.type('/fake-tool Bash {"cmd":"echo hi"}', { delay: 50 })
@@ -461,7 +467,7 @@ test.describe('Idea Session Flow', () => {
     const uuid = await getMountedSessionId(page)
     const readTerminalText = () => readSessionReplay(page, uuid)
 
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
+    await expect.poll(readTerminalText, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS }).toContain('mcp connected:')
 
     await page.locator('.terminal-container').click()
     await page.keyboard.type('/clear', { delay: 50 })
@@ -506,7 +512,7 @@ test.describe('Idea Session Flow', () => {
 
     const uuid = await getMountedSessionId(page)
     const readTerminalText = () => readSessionReplay(page, uuid)
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
+    await expect.poll(readTerminalText, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS }).toContain('mcp connected:')
 
     await page.locator('.terminal-container').click()
     await page.keyboard.type('/compact', { delay: 50 })
@@ -550,7 +556,7 @@ test.describe('Idea Session Flow', () => {
     const uuid = await getMountedSessionId(page)
 
     const readTerminalText = () => readSessionReplay(page, uuid)
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
+    await expect.poll(readTerminalText, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS }).toContain('mcp connected:')
 
     for (let i = 0; i < 12; i++) {
       await page.evaluate(({ id, n }) => {
@@ -585,7 +591,7 @@ test.describe('Idea Session Flow', () => {
     const uuid = await getMountedSessionId(page)
 
     const readTerminalText = () => readSessionReplay(page, uuid)
-    await expect.poll(readTerminalText, { timeout: 10000 }).toContain('mcp connected:')
+    await expect.poll(readTerminalText, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS }).toContain('mcp connected:')
 
     for (let i = 0; i < 12; i++) {
       await page.evaluate(({ id, n }) => {
