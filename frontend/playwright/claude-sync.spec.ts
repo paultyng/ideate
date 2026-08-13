@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { promises as fs } from 'fs'
 import * as path from 'path'
+import { AGENT_LIFECYCLE_TIMEOUT_MS } from './ptyCapture'
 
 const projectsDir = process.env.TEST_CLAUDE_PROJECTS_DIR || ''
 const ideasDir = process.env.TEST_IDEAS_DIR || ''
@@ -48,7 +49,7 @@ async function startAndEndTestagent(page: import('@playwright/test').Page) {
   await page.keyboard.type('/exit', { delay: 50 })
   await page.keyboard.press('Enter')
   await expect(page.locator('.session-toolbar-status, .status-badge'))
-    .toContainText(/exited|stopped|completed/, { timeout: 10000 })
+    .toContainText(/exited|stopped|completed/, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS })
 }
 
 async function expandSessions(page: import('@playwright/test').Page) {

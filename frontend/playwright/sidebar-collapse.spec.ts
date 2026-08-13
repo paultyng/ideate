@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { AGENT_LIFECYCLE_TIMEOUT_MS } from './ptyCapture'
 
 async function createIdea(page: import('@playwright/test').Page, name: string): Promise<string> {
   await page.goto('/#/idea/new')
@@ -38,7 +39,7 @@ async function startAndEndSession(page: import('@playwright/test').Page) {
   await page.keyboard.type('/exit', { delay: 50 })
   await page.keyboard.press('Enter')
   await expect(page.locator('.session-toolbar-status, .status-badge'))
-    .toContainText(/exited|stopped|completed/, { timeout: 10000 })
+    .toContainText(/exited|stopped|completed/, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS })
 }
 
 test.describe('Sessions sidebar section collapse', () => {

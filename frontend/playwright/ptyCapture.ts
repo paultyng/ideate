@@ -193,10 +193,18 @@ export async function waitForTerminalMount(
 // because the marker is currently visible — using the replay keeps
 // readiness honest: if it scrolled off the screen for any reason we
 // want to know.
+// AGENT_LIFECYCLE_TIMEOUT_MS is the shared budget for any wait that blocks
+// on the testagent reaching a lifecycle state — boot/MCP-connect readiness or
+// teardown/exit. On loaded CI runners the testagent boot → MCP `Connect()`
+// handshake routinely exceeds 10s (ac3607a bumped dashboard's wait 5s→15s for
+// exactly this). Kept as one exported constant so per-spec literals can't
+// drift back below the proven value; that duplication was the flake's root.
+export const AGENT_LIFECYCLE_TIMEOUT_MS = 15_000
+
 export async function waitForAgentReady(
   page: Page,
   sessionId: string,
-  timeoutMs = 15_000,
+  timeoutMs = AGENT_LIFECYCLE_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {

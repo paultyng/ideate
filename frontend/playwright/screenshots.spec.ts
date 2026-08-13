@@ -2,6 +2,7 @@ import { test, expect, Page } from '@playwright/test'
 import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
+import { AGENT_LIFECYCLE_TIMEOUT_MS } from './ptyCapture'
 
 // Screenshot specs run as part of `task test:ui` (assertions exercise
 // the views every run) and as `task screenshots` (sets SAVE_SCREENSHOTS=1
@@ -231,7 +232,7 @@ test.describe('Screenshots', () => {
         }
         return false
       },
-      { timeout: 10000 },
+      { timeout: AGENT_LIFECYCLE_TIMEOUT_MS },
     )
 
     // Inject the hero transcript directly into xterm — bypasses the
