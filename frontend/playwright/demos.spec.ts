@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test'
 import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
-import { AGENT_LIFECYCLE_TIMEOUT_MS, waitForAgentReady } from './ptyCapture'
+import { AGENT_LIFECYCLE_TIMEOUT_MS, stopAllRunningSessions, waitForAgentReady } from './ptyCapture'
 
 // Demo specs produce the README's animated GIFs. Each test name maps
 // 1:1 to a `docs/media/<name>.gif` output via `task generate:demos`,
@@ -126,6 +126,10 @@ test.use({
 })
 
 test.describe('Demos', () => {
+  test.afterEach(async ({ page }) => {
+    await stopAllRunningSessions(page)
+  })
+
   test('quick-switch', async ({ page }) => {
     runSeedtest()
     await page.goto('/')

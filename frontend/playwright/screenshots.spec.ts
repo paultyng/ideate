@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test'
 import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
-import { AGENT_LIFECYCLE_TIMEOUT_MS } from './ptyCapture'
+import { AGENT_LIFECYCLE_TIMEOUT_MS, stopAllRunningSessions } from './ptyCapture'
 
 // Screenshot specs run as part of `task test:ui` (assertions exercise
 // the views every run) and as `task screenshots` (sets SAVE_SCREENSHOTS=1
@@ -130,6 +130,10 @@ function runSeedtest(): void {
 
 test.describe('Screenshots', () => {
   test.use({ viewport: { width: 1400, height: 900 } })
+
+  test.afterEach(async ({ page }) => {
+    await stopAllRunningSessions(page)
+  })
 
   test('dashboard with seeded ideas', async ({ page }) => {
     runSeedtest()
