@@ -128,18 +128,16 @@ export async function stopAllRunningSessions(page: Page): Promise<void> {
 // getMountedSessionId returns one mounted TerminalPanel's session id —
 // the last one in insertion order — for tests that started a session
 // via the form flow (no binding return value handing back the uuid).
-// Throws if no terminal has mounted yet; pair with `waitForSelector`
-// on `.xterm-screen` first.
-export async function getMountedSessionId(page: Page): Promise<string> {
-  const id = await page.evaluate(() => {
+// Waits for the registry entry: `.xterm-screen` can appear before
+// TerminalPanel's effect registers the id.
+export async function getMountedSessionId(page: Page, timeoutMs = 5_000): Promise<string> {
+  const handle = await page.waitForFunction(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
-    if (!reg) return ''
-    const keys = Object.keys(reg)
-    return keys.length ? keys[keys.length - 1] : ''
-  })
-  if (!id) throw new Error('getMountedSessionId: no terminal mounted yet')
-  return id
+    const keys = reg ? Object.keys(reg) : []
+    return keys.length ? keys[keys.length - 1] : false
+  }, undefined, { timeout: timeoutMs })
+  return (await handle.jsonValue()) as string
 }
 
 // waitForTerminalMount blocks until TerminalPanel has registered the

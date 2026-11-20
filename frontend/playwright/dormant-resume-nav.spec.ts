@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { stopAllRunningSessions } from './ptyCapture'
+import { getMountedSessionId, stopAllRunningSessions } from './ptyCapture'
 
 // Dormant sessions should be navigation-treated like running sessions
 // from every entry point (home card, idea-detail terminal toggle,
@@ -138,11 +138,7 @@ test.describe('Dormant resume on navigation', () => {
     await page.selectOption('.session-start select', 'testagent')
     await page.click('button:has-text("Start Session")')
     await page.waitForSelector('.terminal-container .xterm-screen', { timeout: 10000 })
-    const uuid = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
-      return reg ? (Object.keys(reg).pop() || '') : ''
-    })
+    const uuid = await getMountedSessionId(page)
     await page.evaluate(async (id) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (window as any).go.app.App.StopSession(id)
