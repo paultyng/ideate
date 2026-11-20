@@ -309,6 +309,7 @@ tasks:
         # Recursive descendant kill — SIGTERM first, then SIGKILL on
         # stragglers. Walks the process tree depth-first so children die
         # before their parent reparents to launchd.
+        # /bin/kill, not kill: Task's shell (mvdan/sh) has no kill builtin.
         kill_tree() {
           local pid="$1"
           [ -z "$pid" ] && return 0
@@ -316,42 +317,33 @@ tasks:
           for child in $(pgrep -P "$pid" 2>/dev/null); do
             kill_tree "$child"
           done
-          kill -TERM "$pid" 2>/dev/null || true
+          /bin/kill -TERM "$pid" 2>/dev/null || true
           local i
           for i in 1 2 3 4 5; do
-            kill -0 "$pid" 2>/dev/null || return 0
+            /bin/kill -0 "$pid" 2>/dev/null || return 0
             sleep 0.2
           done
-          kill -KILL "$pid" 2>/dev/null || true
+          /bin/kill -KILL "$pid" 2>/dev/null || true
         }
 
         # On exit, kill ONLY the wails dev subtree this task launched.
         # Previous incarnation pkill'd by command-line regex, which
         # matched the user's production /Applications/ideate.app and any
-        # `task dev`/`task dev:user` they had running. Two-pronged scope:
+        # `task dev`/`task dev:user` they had running.
         #
-        # 1. Port owner: wails dev binds 34116; lsof -ti gives us its PID
-        #    regardless of parentage (wails dev daemonizes via fork-then-
-        #    reparent-to-launchd, so the WAILS_DEV_PID we captured loses
-        #    descendants by the time cleanup runs).
-        # 2. WAILS_DEV_PID fallback: catches the boot-window case where
-        #    wails dev exited before binding, but children (vite, dev
-        #    ideate binary) are still alive.
-        WAILS_DEV_PID=""
         # find_dev_pids prints the PID(s) that belong to this task's dev
-        # tree, sourced from three signals (deduped):
+        # tree, sourced from two signals (deduped):
         #   1. The wails dev process whose argv carries the unique
         #      `-devserver localhost:34116` (won't match production
         #      Ideate or any `task dev:user` on 34115).
         #   2. Whatever owns port 34116 (often the dev ideate bundle
-        #      child, NOT wails dev itself).
-        #   3. The subshell we backgrounded as WAILS_DEV_PID, if still
-        #      alive — covers the boot window before wails dev daemonized.
+        #      child, NOT wails dev itself; wails dev reparents it to
+        #      launchd, so the argv match alone misses it).
+        # No $! fallback: mvdan/sh's $! is a job id ("g1"), not a PID.
         find_dev_pids() {
           {
             pgrep -f 'wails dev.*-devserver localhost:34116' 2>/dev/null
             lsof -ti :34116 2>/dev/null
-            [ -n "$WAILS_DEV_PID" ] && kill -0 "$WAILS_DEV_PID" 2>/dev/null && echo "$WAILS_DEV_PID"
           } | sort -u
         }
         cleanup() {
@@ -381,8 +373,7 @@ tasks:
         # both `task dev:user` (34115/34117) and `task dev` (34116/34118).
         TEST_CONFIG="$(mktemp -d)/ideate-test"
         (cd cmd/ideate && IDEATE_CONFIG_DIR="$TEST_CONFIG" IDEATE_IDEAS_DIR="$TEST_CONFIG/ideas" IDEATE_HOOKS_PORT=34119 IDEATE_LOG_DIR="$TEST_CONFIG/logs" IDEATE_CLAUDE_PROJECTS_DIR="$TEST_CONFIG/claude-projects" TESTAGENT_AUTO_EXIT={{.TESTAGENT_AUTO_EXIT}} TESTAGENT_DELAY=50ms wails dev -tags dev -devserver localhost:34116) > "$LOG_FILE" 2>&1 &
-        WAILS_DEV_PID=$!
-        echo "wails dev started (PID $WAILS_DEV_PID), waiting for server..."
+        echo "wails dev started, waiting for server..."
 
         # Poll dev server (max 120s — CI first run is slow)
         for i in $(seq 1 120); do
