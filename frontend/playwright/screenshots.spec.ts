@@ -222,6 +222,21 @@ test.describe('Screenshots', () => {
     // baseline. See waitForAgentReady's comment in ptyCapture.ts for
     // why the banner-border check was replaced.
     await waitForAgentReady(page, orchUUID)
+    // The replay write into xterm is async; injecting before it lands
+    // gets the transcript overwritten.
+    await page.waitForFunction(
+      (id) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const buf = (window as any).__ideateTerminals?.[id]?.buffer.active
+        if (!buf) return false
+        for (let i = 0; i < buf.length; i++) {
+          if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
+        }
+        return false
+      },
+      orchUUID,
+      { timeout: 5000 },
+    )
 
     // Inject the hero transcript directly into xterm — bypasses the
     // PTY (we want it to render as if it were agent output, not user

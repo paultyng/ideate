@@ -126,8 +126,10 @@ test.use({
 })
 
 test.describe('Demos', () => {
-  // Teardown on an unrecorded page so it stays out of the GIF.
-  test.afterEach(async ({ browser }, testInfo) => {
+  // Close the recorded page first, then tear down on an unrecorded one,
+  // so teardown stays out of the GIF.
+  test.afterEach(async ({ page: recorded, browser }, testInfo) => {
+    await recorded.close()
     const page = await browser.newPage({ baseURL: testInfo.project.use.baseURL })
     try {
       await page.goto('/')

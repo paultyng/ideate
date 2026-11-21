@@ -342,7 +342,8 @@ tasks:
         # No $! fallback: mvdan/sh's $! is a job id ("g1"), not a PID.
         find_dev_pids() {
           {
-            pgrep -f 'wails dev.*-devserver localhost:34116' 2>/dev/null
+            # || true: in mvdan/sh a failing command drops the rest of the group.
+            pgrep -f 'wails dev.*-devserver localhost:34116' 2>/dev/null || true
             lsof -nP -t -iTCP:34116 -sTCP:LISTEN 2>/dev/null
           } | sort -u
         }
