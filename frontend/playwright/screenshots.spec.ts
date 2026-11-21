@@ -2,6 +2,7 @@ import { test, expect, Page } from '@playwright/test'
 import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
+import { stopAllRunningSessions, waitForAgentReady } from './ptyCapture'
 
 // Screenshot specs run as part of `task test:ui` (assertions exercise
 // the views every run) and as `task screenshots` (sets SAVE_SCREENSHOTS=1
@@ -130,6 +131,10 @@ function runSeedtest(): void {
 test.describe('Screenshots', () => {
   test.use({ viewport: { width: 1400, height: 900 } })
 
+  test.afterEach(async ({ page }) => {
+    await stopAllRunningSessions(page)
+  })
+
   test('dashboard with seeded ideas', async ({ page }) => {
     runSeedtest()
     await page.goto('/')
@@ -202,9 +207,9 @@ test.describe('Screenshots', () => {
       await window.go.app.App.StartIdeaSession(slug, 'testagent', false)
     }, searchIdeaSlug)
 
-    await page.evaluate(async () => {
+    const orchUUID = await page.evaluate(async () => {
       // @ts-expect-error wails binding
-      await window.go.app.App.StartRootSession('testagent')
+      return ((await window.go.app.App.StartRootSession('testagent')) as { uuid: string }).uuid
     })
 
     await page.reload()
@@ -216,22 +221,21 @@ test.describe('Screenshots', () => {
     // fired) so the subsequent transcript write lands on a stable
     // baseline. See waitForAgentReady's comment in ptyCapture.ts for
     // why the banner-border check was replaced.
+    await waitForAgentReady(page, orchUUID)
+    // The replay write into xterm is async; injecting before it lands
+    // gets the transcript overwritten.
     await page.waitForFunction(
-      () => {
+      (id) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const reg = (window as any).__ideateTerminals as Record<string, {
-          buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } }
-        }> | undefined
-        if (!reg) return false
-        for (const term of Object.values(reg)) {
-          const buf = term.buffer.active
-          for (let i = 0; i < buf.length; i++) {
-            if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
-          }
+        const buf = (window as any).__ideateTerminals?.[id]?.buffer.active
+        if (!buf) return false
+        for (let i = 0; i < buf.length; i++) {
+          if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
         }
         return false
       },
-      { timeout: 10000 },
+      orchUUID,
+      { timeout: 5000 },
     )
 
     // Inject the hero transcript directly into xterm — bypasses the
@@ -274,6 +278,7 @@ test.describe('Screenshots', () => {
         }
         return false
       },
+      undefined,
       { timeout: 5000 },
     )
 

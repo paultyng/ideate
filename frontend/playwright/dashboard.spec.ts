@@ -36,6 +36,10 @@ async function createIdea(page: import('@playwright/test').Page, name: string): 
 }
 
 test.describe('Dashboard', () => {
+  test.afterEach(async ({ page }) => {
+    await stopAllRunningSessions(page)
+  })
+
   test('renders dashboard with global app footer', async ({ page }) => {
     await page.goto('/')
     // Dashboard has no h1 anymore — anchor on the .dashboard container
@@ -738,6 +742,7 @@ async function waitForBanner(page: import('@playwright/test').Page) {
         }
         return false
       },
+      undefined,
       { timeout: 15000 },
     )
   } catch (err) {

@@ -8,7 +8,7 @@ async function applyStub(page: Page) {
   await page.waitForFunction(() => {
     const w = window as unknown as Record<string, unknown>
     return Boolean((w.runtime as Record<string, unknown> | undefined)?.BrowserOpenURL)
-  }, { timeout: 10000 })
+  }, undefined, { timeout: 10000 })
   await page.evaluate(() => {
     const w = window as unknown as Record<string, unknown>
     w.__browserOpens = (w.__browserOpens as string[]) ?? []

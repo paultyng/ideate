@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test'
 import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
-import { waitForAgentReady } from './ptyCapture'
+import { AGENT_LIFECYCLE_TIMEOUT_MS, stopAllRunningSessions, waitForAgentReady } from './ptyCapture'
 
 // Demo specs produce the README's animated GIFs. Each test name maps
 // 1:1 to a `docs/media/<name>.gif` output via `task generate:demos`,
@@ -126,6 +126,21 @@ test.use({
 })
 
 test.describe('Demos', () => {
+  // Close the recorded page first, then tear down on an unrecorded one,
+  // so teardown stays out of the GIF.
+  test.afterEach(async ({ page: recorded, browser }, testInfo) => {
+    await recorded.close()
+    const page = await browser.newPage({ baseURL: testInfo.project.use.baseURL })
+    try {
+      await page.goto('/')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await page.waitForFunction(() => (window as any).go?.app?.App)
+      await stopAllRunningSessions(page)
+    } finally {
+      await page.close()
+    }
+  })
+
   test('quick-switch', async ({ page }) => {
     runSeedtest()
     await page.goto('/')
@@ -331,7 +346,8 @@ existing search infrastructure and avoids the dual-write footgun.
         }
         return false
       },
-      { timeout: 10000 },
+      undefined,
+      { timeout: AGENT_LIFECYCLE_TIMEOUT_MS },
     )
 
     // Settle frame so the GIF starts on the dashboard + idle drawer.
