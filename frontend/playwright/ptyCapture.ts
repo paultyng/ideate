@@ -92,6 +92,8 @@ export async function readSessionReplay(page: Page, uuid: string): Promise<strin
 // contaminates capturePty's combined stream when tests read without
 // a sessionId.
 export async function stopAllRunningSessions(page: Page): Promise<void> {
+  // A crashed/closed page would throw here and mask the test's real failure.
+  if (page.isClosed()) return
   await page.evaluate(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const W = window as any
@@ -162,6 +164,14 @@ export async function waitForTerminalMount(
   )
 }
 
+// AGENT_LIFECYCLE_TIMEOUT_MS is the shared budget for any wait that blocks
+// on the testagent reaching a lifecycle state — boot/MCP-connect readiness or
+// teardown/exit. On loaded CI runners the testagent boot → MCP `Connect()`
+// handshake routinely exceeds 10s (ac3607a bumped dashboard's wait 5s→15s for
+// exactly this). Kept as one exported constant so per-spec literals can't
+// drift back below the proven value; that duplication was the flake's root.
+export const AGENT_LIFECYCLE_TIMEOUT_MS = 15_000
+
 // waitForAgentReady blocks until the upstream testagent has finished
 // booting (MCP connected + SessionStart fired) for `sessionId`. The
 // TUI puts stdin in raw mode only after Bubbletea finishes its first
@@ -191,14 +201,6 @@ export async function waitForTerminalMount(
 // because the marker is currently visible — using the replay keeps
 // readiness honest: if it scrolled off the screen for any reason we
 // want to know.
-// AGENT_LIFECYCLE_TIMEOUT_MS is the shared budget for any wait that blocks
-// on the testagent reaching a lifecycle state — boot/MCP-connect readiness or
-// teardown/exit. On loaded CI runners the testagent boot → MCP `Connect()`
-// handshake routinely exceeds 10s (ac3607a bumped dashboard's wait 5s→15s for
-// exactly this). Kept as one exported constant so per-spec literals can't
-// drift back below the proven value; that duplication was the flake's root.
-export const AGENT_LIFECYCLE_TIMEOUT_MS = 15_000
-
 export async function waitForAgentReady(
   page: Page,
   sessionId: string,

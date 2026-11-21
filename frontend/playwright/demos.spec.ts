@@ -126,8 +126,17 @@ test.use({
 })
 
 test.describe('Demos', () => {
-  test.afterEach(async ({ page }) => {
-    await stopAllRunningSessions(page)
+  // Teardown on an unrecorded page so it stays out of the GIF.
+  test.afterEach(async ({ browser }, testInfo) => {
+    const page = await browser.newPage({ baseURL: testInfo.project.use.baseURL })
+    try {
+      await page.goto('/')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await page.waitForFunction(() => (window as any).go?.app?.App)
+      await stopAllRunningSessions(page)
+    } finally {
+      await page.close()
+    }
   })
 
   test('quick-switch', async ({ page }) => {
@@ -335,6 +344,7 @@ existing search infrastructure and avoids the dual-write footgun.
         }
         return false
       },
+      undefined,
       { timeout: AGENT_LIFECYCLE_TIMEOUT_MS },
     )
 

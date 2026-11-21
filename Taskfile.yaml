@@ -336,14 +336,14 @@ tasks:
         #   1. The wails dev process whose argv carries the unique
         #      `-devserver localhost:34116` (won't match production
         #      Ideate or any `task dev:user` on 34115).
-        #   2. Whatever owns port 34116 (often the dev ideate bundle
+        #   2. Whatever listens on 34116 (often the dev ideate bundle
         #      child, NOT wails dev itself; wails dev reparents it to
         #      launchd, so the argv match alone misses it).
         # No $! fallback: mvdan/sh's $! is a job id ("g1"), not a PID.
         find_dev_pids() {
           {
             pgrep -f 'wails dev.*-devserver localhost:34116' 2>/dev/null
-            lsof -ti :34116 2>/dev/null
+            lsof -nP -t -iTCP:34116 -sTCP:LISTEN 2>/dev/null
           } | sort -u
         }
         cleanup() {
@@ -353,20 +353,19 @@ tasks:
             kill_tree "$pid"
           done
         }
+        # Refuse rather than kill: `task dev` shares 34116 and matches the
+        # same argv. Checked before the trap so exit doesn't kill it.
+        busy=$(find_dev_pids)
+        if [ -n "$busy" ]; then
+          echo "34116 in use (task dev or a stale test run?): pids $busy" >&2
+          exit 1
+        fi
+
         # Trap covers error paths (set -e early-exit, signals).
         # The end-of-script also calls cleanup explicitly — empirically,
         # `task: <subtask>` invocation boundaries can prevent the trap
         # from firing reliably; the explicit call is the load-bearing one.
         trap cleanup EXIT
-
-        # Pre-launch cleanup: kill any stale process from a crashed
-        # test run that holds the wails dev port or matches our unique
-        # argv. Surgical — won't touch production /Applications/ideate.app
-        # or any `task dev:user` on 34115.
-        for pid in $(find_dev_pids); do
-          echo "Killing stale process: $pid"
-          kill_tree "$pid"
-        done
 
         # Start wails dev in background (isolated config + ideas dir).
         # Wails dev on 34116, hooks on 34119 so test:ui can run alongside
