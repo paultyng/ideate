@@ -742,6 +742,7 @@ async function waitForBanner(page: import('@playwright/test').Page) {
         }
         return false
       },
+      undefined,
       { timeout: 15000 },
     )
   } catch (err) {

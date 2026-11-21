@@ -5,6 +5,7 @@ import {
   getMountedSessionId,
   readSessionReplay,
   stopAllRunningSessions,
+  waitForAgentReady,
 } from './ptyCapture'
 
 // Helper: create an idea and return its slug from the URL.
@@ -69,22 +70,7 @@ async function waitForSessionEnd(page: import('@playwright/test').Page) {
   // Wait for upstream's banner so Bubbletea has put stdin in raw
   // mode — bytes typed before that go through the PTY's line
   // discipline and the slash-command parser never sees them.
-  await page.waitForFunction(
-    () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as
-        | Record<string, { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }>
-        | undefined
-      if (!reg) return false
-      for (const term of Object.values(reg)) {
-        for (let i = 0; i < term.buffer.active.length; i++) {
-          if (term.buffer.active.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
-        }
-      }
-      return false
-    },
-    { timeout: 15000 },
-  )
+  await waitForAgentReady(page, await getMountedSessionId(page))
   await page.locator('.terminal-container').click()
   await page.keyboard.type('/exit', { delay: 50 })
   await page.keyboard.press('Enter')

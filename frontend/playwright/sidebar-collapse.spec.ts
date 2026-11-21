@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { AGENT_LIFECYCLE_TIMEOUT_MS } from './ptyCapture'
+import { AGENT_LIFECYCLE_TIMEOUT_MS, getMountedSessionId, waitForAgentReady } from './ptyCapture'
 
 async function createIdea(page: import('@playwright/test').Page, name: string): Promise<string> {
   await page.goto('/#/idea/new')
@@ -19,22 +19,7 @@ async function startAndEndSession(page: import('@playwright/test').Page) {
   // orchestrator-driven sessions alive long enough for MCP-mediated
   // writes), which the 10s status-flip wait below would race.
   // Wait for the banner first so Bubbletea has put stdin in raw mode.
-  await page.waitForFunction(
-    () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as
-        | Record<string, { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }>
-        | undefined
-      if (!reg) return false
-      for (const term of Object.values(reg)) {
-        for (let i = 0; i < term.buffer.active.length; i++) {
-          if (term.buffer.active.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
-        }
-      }
-      return false
-    },
-    { timeout: 15000 },
-  )
+  await waitForAgentReady(page, await getMountedSessionId(page))
   await page.locator('.terminal-container').click()
   await page.keyboard.type('/exit', { delay: 50 })
   await page.keyboard.press('Enter')

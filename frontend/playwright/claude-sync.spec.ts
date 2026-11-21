@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { promises as fs } from 'fs'
 import * as path from 'path'
-import { AGENT_LIFECYCLE_TIMEOUT_MS } from './ptyCapture'
+import { AGENT_LIFECYCLE_TIMEOUT_MS, getMountedSessionId, waitForAgentReady } from './ptyCapture'
 
 const projectsDir = process.env.TEST_CLAUDE_PROJECTS_DIR || ''
 const ideasDir = process.env.TEST_IDEAS_DIR || ''
@@ -29,22 +29,7 @@ async function startAndEndTestagent(page: import('@playwright/test').Page) {
   // Drive /exit explicitly — TESTAGENT_AUTO_EXIT is 30s, which the
   // 10s status-flip wait below would race. Wait for the banner first
   // so Bubbletea has put stdin in raw mode.
-  await page.waitForFunction(
-    () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as
-        | Record<string, { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }>
-        | undefined
-      if (!reg) return false
-      for (const term of Object.values(reg)) {
-        for (let i = 0; i < term.buffer.active.length; i++) {
-          if (term.buffer.active.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
-        }
-      }
-      return false
-    },
-    { timeout: 15000 },
-  )
+  await waitForAgentReady(page, await getMountedSessionId(page))
   await page.locator('.terminal-container').click()
   await page.keyboard.type('/exit', { delay: 50 })
   await page.keyboard.press('Enter')
