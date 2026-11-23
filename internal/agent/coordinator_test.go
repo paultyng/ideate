@@ -449,7 +449,7 @@ func TestCoordinator_StartExitThenRestart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = coord.Stop(ctx, "again-uuid") })
 
-	// The first session's exit goroutine must not have removed the new manifest.
+	// Restart after exit must write a fresh manifest.
 	time.Sleep(200 * time.Millisecond)
 	if _, err := os.Stat(manifestPath(configDir, "again-uuid")); err != nil {
 		t.Errorf("restarted session manifest missing: %v", err)

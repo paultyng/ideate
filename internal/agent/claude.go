@@ -172,7 +172,7 @@ func (r *ClaudeCodeRunner) Run(_ context.Context, config SessionConfig, outputFu
 				}
 				attrs := []any{
 					slog.String("uuid", config.SessionID),
-					slog.String("slug", config.IdeaSlug),
+					slog.String("idea_slug", config.IdeaSlug),
 					slog.Int("repos", repos),
 					slog.Int64("ms", time.Since(ideaStart).Milliseconds()),
 				}

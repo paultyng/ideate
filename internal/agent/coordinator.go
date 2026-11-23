@@ -192,7 +192,7 @@ func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (str
 		<-session.Wait()
 		meta := ownMeta
 		c.mu.Lock()
-		// Skip cleanup if a different session now owns this uuid.
+		// Defensive: Start rejects a present uuid, so this is always true today.
 		if c.sessions[uuid] == session {
 			if c.configDir != "" {
 				if err := removeManifest(c.configDir, uuid); err != nil {
