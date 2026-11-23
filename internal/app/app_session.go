@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -308,16 +309,33 @@ func (a *App) ListSessions() []agent.SessionInfo {
 // The returned string is base64-encoded.
 
 func (a *App) GetSessionReplay(id string) (string, error) {
+	start := time.Now()
 	data, err := a.coordinator.GetSessionReplay(id)
 	if err != nil {
 		return "", err
 	}
+	slog.Info("app: session replay",
+		slog.String("uuid", id),
+		slog.Int64("ms", time.Since(start).Milliseconds()),
+		slog.Int("bytes", len(data)))
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
 // navigate is the callback passed to the IPC server.
 
-func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionStartResult, error) {
+func (a *App) StartIdeaSession(slug, agentType string, resume bool) (res *SessionStartResult, err error) {
+	startedAt := time.Now()
+	defer func() {
+		attrs := []any{slog.String("slug", slug), slog.Int64("total_ms", time.Since(startedAt).Milliseconds())}
+		if res != nil {
+			attrs = append(attrs, slog.String("uuid", res.UUID))
+		}
+		if err != nil {
+			attrs = append(attrs, slog.Any("err", err))
+		}
+		slog.Info("app: start timing", attrs...)
+	}()
+
 	idea, err := a.svc.Get(a.ctx, slug)
 	if err != nil {
 		return nil, fmt.Errorf("loading idea: %w", err)
@@ -373,6 +391,16 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 		config.AgentUUID = sessionUUID
 	}
 
+	if resume {
+		if _, loaded := a.resuming.LoadOrStore(sessionUUID, struct{}{}); loaded {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
+		defer a.resuming.Delete(sessionUUID)
+		if a.coordinator.IsRunning(sessionUUID) {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
+	}
+
 	// Register the MCP server instance for this session BEFORE spawning
 	// the agent process. The agent connects to /mcp during boot; if the
 	// connect lands before RegisterSession runs, the MCP handler logs
@@ -391,6 +419,9 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 	// Start the agent process BEFORE writing to the store. If start fails,
 	// no orphaned "running" records are left behind.
 	if _, err := a.coordinator.Start(a.ctx, config); err != nil {
+		if errors.Is(err, agent.ErrSessionStarting) {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
 		if a.mcpManager != nil {
 			a.mcpManager.UnregisterSession(sessionUUID)
 		}
@@ -449,7 +480,20 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 //
 // Errors when: idea archived, session not found for slug, session is
 // still running (no-op-resume guard), agent type doesn't support resume.
-func (a *App) ResumeIdeaSession(slug, sessionUUID string) (*SessionStartResult, error) {
+func (a *App) ResumeIdeaSession(slug, sessionUUID string) (res *SessionStartResult, err error) {
+	startedAt := time.Now()
+	defer func() {
+		attrs := []any{
+			slog.String("uuid", sessionUUID),
+			slog.String("slug", slug),
+			slog.Int64("total_ms", time.Since(startedAt).Milliseconds()),
+		}
+		if err != nil {
+			attrs = append(attrs, slog.Any("err", err))
+		}
+		slog.Info("app: resume timing", attrs...)
+	}()
+
 	if slug == "" {
 		return nil, fmt.Errorf("slug is required")
 	}
@@ -489,10 +533,21 @@ func (a *App) ResumeIdeaSession(slug, sessionUUID string) (*SessionStartResult, 
 		ResumeUUID: sessionUUID,
 	}
 
+	if _, loaded := a.resuming.LoadOrStore(sessionUUID, struct{}{}); loaded {
+		return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+	}
+	defer a.resuming.Delete(sessionUUID)
+	if a.coordinator.IsRunning(sessionUUID) {
+		return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+	}
+
 	if a.mcpManager != nil {
 		a.mcpManager.RegisterSession(sessionUUID)
 	}
 	if _, err := a.coordinator.Start(a.ctx, config); err != nil {
+		if errors.Is(err, agent.ErrSessionStarting) {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
 		if a.mcpManager != nil {
 			a.mcpManager.UnregisterSession(sessionUUID)
 		}

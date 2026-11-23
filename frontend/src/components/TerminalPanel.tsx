@@ -94,6 +94,21 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
 
     terminal.open(containerRef.current)
 
+    // Wails runs each IPC call in its own goroutine, so concurrent writes
+    // can reach the PTY out of order. Chain them.
+    let writeChain: Promise<unknown> = Promise.resolve()
+    const writeToSession = (data: string) => {
+      writeChain = writeChain.then(() => callBinding('WriteToSession', sessionId, data))
+    }
+
+    // A detached or collapsed container makes FitAddon clamp to 2x1, which
+    // would truncate the backend screen via ResizeSession.
+    const fitIfVisible = () => {
+      const d = fitAddon.proposeDimensions()
+      if (!d || d.cols <= 2 || d.rows <= 1) return
+      fitAddon.fit()
+    }
+
     // Shift+Enter sends ESC+CR (the sequence Claude Code's `/terminal-setup`
     // registers in iTerm2) so the TUI inserts a newline rather than submitting.
     // Suppress all event phases — WebKit fires keypress for Enter, and xterm's
@@ -101,7 +116,7 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.key === 'Enter' && e.shiftKey) {
         if (e.type === 'keydown') {
-          callBinding('WriteToSession', sessionId, '\x1b\r')
+          writeToSession('\x1b\r')
         }
         return false
       }
@@ -134,14 +149,14 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
       // WebGL not available, fall back to canvas renderer
     }
 
-    fitAddon.fit()
+    fitIfVisible()
     termDebug('initial fit', sessionId, { cols: terminal.cols, rows: terminal.rows })
     // One extra fit after the next frame: the host's position:fixed
     // bounds can settle a frame after useEffect runs, leaving the
     // first fit measuring a stale container size. Re-measure once
     // layout is committed.
     const refitRaf = requestAnimationFrame(() => {
-      fitAddon.fit()
+      fitIfVisible()
       termDebug('post-rAF fit', sessionId, { cols: terminal.cols, rows: terminal.rows })
     })
     terminal.focus()
@@ -182,7 +197,7 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
       // eslint-disable-next-line no-control-regex
       const cleaned = data.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
       if (cleaned.length === 0) return
-      callBinding('WriteToSession', sessionId, cleaned)
+      writeToSession(cleaned)
     })
 
     // Terminal resize -> Go PTY
@@ -237,7 +252,7 @@ export default function TerminalPanel({ sessionId }: TerminalPanelProps) {
       const e = entries[0]
       const rect = e?.contentRect
       termDebug('container resize -> fit', sessionId, rect ? { w: rect.width, h: rect.height } : {})
-      fitAddon.fit()
+      fitIfVisible()
     })
     resizeObserver.observe(containerRef.current)
 

@@ -109,6 +109,9 @@ function focusTerminal(uuid: string): void {
   }, 0)
 }
 
+// Dormant uuids with a resume in flight; duplicate clicks are ignored.
+const pendingResumes = new Set<string>()
+
 // Returns an async navigation callback. Callers pass an idea slug + the
 // session summary and the hook does the rest. Designed to be called from
 // onClick handlers — the returned function is stable across renders so
@@ -132,16 +135,26 @@ export function useNavigateToIdeaSession(): (
         return
       }
       if (target.kind === 'dormant') {
+        const uuid = target.session.uuid
+        if (pendingResumes.has(uuid)) return
+        pendingResumes.add(uuid)
         try {
           // Explicit-UUID resume: ResumeIdeaSession respects the caller's
           // chosen UUID. StartIdeaSession(resume=true) would re-pick on the
           // backend side and could resume a different session if a newer
           // user-terminated one exists.
-          await ResumeIdeaSession(slug, target.session.uuid)
-          navigate(`/idea/${slug}/session/${target.session.uuid}`)
-          focusTerminal(target.session.uuid)
-        } catch {
-          navigate(`/idea/${slug}`)
+          await ResumeIdeaSession(slug, uuid)
+          navigate(`/idea/${slug}/session/${uuid}`)
+          focusTerminal(uuid)
+        } catch (err) {
+          if (/already running/i.test(String(err))) {
+            navigate(`/idea/${slug}/session/${uuid}`)
+            focusTerminal(uuid)
+          } else {
+            navigate(`/idea/${slug}`)
+          }
+        } finally {
+          pendingResumes.delete(uuid)
         }
         return
       }
