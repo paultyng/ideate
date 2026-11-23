@@ -35,8 +35,8 @@ type sessionView struct {
 	Started    string `json:"started"`
 	WorkingDir string `json:"working_dir,omitempty"`
 	// IdeaSummary is the one-line headless summary of the idea, lifted
-	// from the persisted sidecar. Empty when no summary has been
-	// generated yet. Gives summarize-ideas / work-idea the same historical
+	// from idea.Description. Empty when no summary has been generated
+	// yet. Gives summarize-ideas / work-idea the same historical
 	// context for dormant entries as for running ones.
 	IdeaSummary string `json:"idea_summary,omitempty"`
 	// SessionURL is the ideate:// deep-link for this session. Lets
@@ -500,20 +500,11 @@ func (m *Manager) listLiveSessions(ctx context.Context) ([]sessionView, []model.
 		if err != nil {
 			continue
 		}
-		// Cache the per-idea summary read so two sessions on the same
-		// idea (e.g. orchestrator-driven + interactive) don't do
-		// duplicate disk reads.
-		var summaryLine string
-		var summaryRead bool
+		// The one-line idea description, lifted straight from the idea.
+		summaryLine := idea.Description
 		for _, s := range sessions {
 			if s.Status != model.SessionStatusRunning && s.Status != model.SessionStatusDormant {
 				continue
-			}
-			if !summaryRead {
-				if sum, err := m.store.ReadSummary(ctx, idea.Slug); err == nil && sum != nil {
-					summaryLine = sum.Line
-				}
-				summaryRead = true
 			}
 			activity := string(s.Activity)
 			if activity == "" {

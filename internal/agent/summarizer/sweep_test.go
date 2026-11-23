@@ -11,23 +11,22 @@ import (
 	ext_store "github.com/paultyng/ideate/internal/store"
 )
 
-// staleFakeStore extends fakeStore with the bits NeedsRegeneration +
-// EnqueueStale need (List, ReadSummary). Stays in-memory.
+// staleFakeStore drives NeedsRegeneration + EnqueueStale off idea
+// state directly: idea.Description ("" = no summary yet) and
+// idea.Generated (OKF content-change time, the staleness anchor —
+// distinct from idea.Updated, which any write bumps) rather than a
+// separate sidecar record.
 type staleFakeStore struct {
-	mu        sync.Mutex
-	ideas     []model.Idea
-	sessions  map[string][]model.AgentSession
-	summaries map[string]model.Summary
-	written   map[string]model.Summary
-
-	readSummaryErr error
+	mu       sync.Mutex
+	ideas    []model.Idea
+	sessions map[string][]model.AgentSession
+	updated  map[string]*model.Idea
 }
 
 func newStaleFakeStore() *staleFakeStore {
 	return &staleFakeStore{
-		sessions:  map[string][]model.AgentSession{},
-		summaries: map[string]model.Summary{},
-		written:   map[string]model.Summary{},
+		sessions: map[string][]model.AgentSession{},
+		updated:  map[string]*model.Idea{},
 	}
 }
 
@@ -61,22 +60,11 @@ func (f *staleFakeStore) ListRepos(_ context.Context, _ string) ([]ext_store.Rep
 	return nil, nil
 }
 
-func (f *staleFakeStore) ReadSummary(_ context.Context, slug string) (*model.Summary, error) {
-	if f.readSummaryErr != nil {
-		return nil, f.readSummaryErr
-	}
+func (f *staleFakeStore) Update(_ context.Context, idea *model.Idea) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if sum, ok := f.summaries[slug]; ok {
-		return &sum, nil
-	}
-	return nil, nil
-}
-
-func (f *staleFakeStore) WriteSummary(_ context.Context, slug string, sum model.Summary) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.written[slug] = sum
+	cp := *idea
+	f.updated[idea.Slug] = &cp
 	return nil
 }
 
@@ -100,10 +88,9 @@ func TestNeedsRegeneration(t *testing.T) {
 	}{
 		{
 			name: "force always regen",
-			setup: func(st *staleFakeStore, _ *model.Idea) {
-				st.summaries["x"] = model.Summary{
-					Line: "fresh", GeneratedAt: now, SourceSessionUUID: "s1",
-				}
+			setup: func(st *staleFakeStore, idea *model.Idea) {
+				idea.Description = "fresh"
+				idea.Updated = now
 				st.sessions["x"] = []model.AgentSession{
 					{UUID: "s1", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier)},
 				}
@@ -119,7 +106,7 @@ func TestNeedsRegeneration(t *testing.T) {
 			wantNeed: true,
 		},
 		{
-			name: "session exists but no sidecar",
+			name: "session exists but no description",
 			setup: func(st *staleFakeStore, _ *model.Idea) {
 				st.sessions["x"] = []model.AgentSession{
 					{UUID: "s1", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier)},
@@ -129,11 +116,10 @@ func TestNeedsRegeneration(t *testing.T) {
 			wantNeed: true,
 		},
 		{
-			name: "newer session than sidecar",
-			setup: func(st *staleFakeStore, _ *model.Idea) {
-				st.summaries["x"] = model.Summary{
-					GeneratedAt: now, SourceSessionUUID: "s1",
-				}
+			name: "newer session than last generation",
+			setup: func(st *staleFakeStore, idea *model.Idea) {
+				idea.Description = "stale line"
+				idea.Generated = earlier
 				st.sessions["x"] = []model.AgentSession{
 					{UUID: "s2", Status: model.SessionStatusCompleted, Ended: ptrTime(now), Started: now},
 					{UUID: "s1", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier), Started: earlier},
@@ -143,26 +129,29 @@ func TestNeedsRegeneration(t *testing.T) {
 			wantNeed: true,
 		},
 		{
-			name: "idea updated after sidecar",
+			// STALE-MASK regression: a session end bumps idea.Updated to a
+			// time >= the session's Ended (via TouchIdea) before this gate
+			// runs. If the gate used Updated it would wrongly read "up to
+			// date" and the sweep safety net would never fire. Keying off
+			// Generated (still `earlier`) correctly detects the stale summary.
+			name: "updated bumped past session end but not summarized",
 			setup: func(st *staleFakeStore, idea *model.Idea) {
-				idea.Updated = later
-				st.summaries["x"] = model.Summary{
-					GeneratedAt: now, SourceSessionUUID: "s1",
-				}
+				idea.Description = "stale line"
+				idea.Generated = earlier
+				idea.Updated = later // bumped by session touch, must be ignored
 				st.sessions["x"] = []model.AgentSession{
-					{UUID: "s1", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier)},
+					{UUID: "s2", Status: model.SessionStatusCompleted, Ended: ptrTime(now), Started: now},
+					{UUID: "s1", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier), Started: earlier},
 				}
 			},
-			want:     ReasonNewerIdea,
+			want:     ReasonNewerSession,
 			wantNeed: true,
 		},
 		{
 			name: "up to date — no regen",
 			setup: func(st *staleFakeStore, idea *model.Idea) {
-				idea.Updated = earlier
-				st.summaries["x"] = model.Summary{
-					GeneratedAt: now, SourceSessionUUID: "s1",
-				}
+				idea.Description = "fresh line"
+				idea.Generated = later
 				st.sessions["x"] = []model.AgentSession{
 					{UUID: "s1", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier)},
 				}
@@ -170,11 +159,10 @@ func TestNeedsRegeneration(t *testing.T) {
 			wantNeed: false,
 		},
 		{
-			name: "running session ignored, sidecar still up to date",
-			setup: func(st *staleFakeStore, _ *model.Idea) {
-				st.summaries["x"] = model.Summary{
-					GeneratedAt: now, SourceSessionUUID: "s1",
-				}
+			name: "running session ignored, description still up to date",
+			setup: func(st *staleFakeStore, idea *model.Idea) {
+				idea.Description = "fresh line"
+				idea.Generated = now
 				st.sessions["x"] = []model.AgentSession{
 					{UUID: "s2-running", Status: model.SessionStatusRunning, Started: later},
 					{UUID: "s1", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier), Started: earlier},
@@ -211,25 +199,19 @@ func TestEnqueueStale_OnlyStaleIdeasEnqueue(t *testing.T) {
 	now := time.Now()
 	earlier := now.Add(-time.Hour)
 	// Three ideas:
-	//   stale: missing sidecar
-	//   fresh: up to date
-	//   newer: newer session than sidecar
+	//   stale: missing description
+	//   fresh: up to date (description newer than the last ended session)
+	//   newer: description present, but a newer session has ended since
 	st.ideas = []model.Idea{
 		{Slug: "stale", Name: "Stale"},
-		{Slug: "fresh", Name: "Fresh"},
-		{Slug: "newer", Name: "Newer"},
+		{Slug: "fresh", Name: "Fresh", Description: "already summarized", Generated: now},
+		{Slug: "newer", Name: "Newer", Description: "stale line", Generated: earlier},
 	}
 	st.sessions["stale"] = []model.AgentSession{
 		{UUID: "a", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier)},
 	}
-	st.summaries["fresh"] = model.Summary{
-		GeneratedAt: now, SourceSessionUUID: "b",
-	}
 	st.sessions["fresh"] = []model.AgentSession{
 		{UUID: "b", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier)},
-	}
-	st.summaries["newer"] = model.Summary{
-		GeneratedAt: earlier, SourceSessionUUID: "c1",
 	}
 	st.sessions["newer"] = []model.AgentSession{
 		{UUID: "c2", Status: model.SessionStatusCompleted, Ended: ptrTime(now), Started: now},
@@ -249,11 +231,11 @@ func TestEnqueueStale_OnlyStaleIdeasEnqueue(t *testing.T) {
 		t.Errorf("enqueued = %d, want 2 (stale + newer)", enqueued)
 	}
 
-	// Two sidecars should land within a beat.
+	// Two ideas should get their Description updated within a beat.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		st.mu.Lock()
-		got := len(st.written)
+		got := len(st.updated)
 		st.mu.Unlock()
 		if got >= 2 {
 			break
@@ -262,13 +244,13 @@ func TestEnqueueStale_OnlyStaleIdeasEnqueue(t *testing.T) {
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if _, ok := st.written["stale"]; !ok {
-		t.Errorf("stale never got written")
+	if _, ok := st.updated["stale"]; !ok {
+		t.Errorf("stale never got updated")
 	}
-	if _, ok := st.written["newer"]; !ok {
-		t.Errorf("newer never got written")
+	if _, ok := st.updated["newer"]; !ok {
+		t.Errorf("newer never got updated")
 	}
-	if _, ok := st.written["fresh"]; ok {
+	if _, ok := st.updated["fresh"]; ok {
 		t.Errorf("fresh was regenerated but shouldn't have been")
 	}
 }
@@ -278,13 +260,13 @@ func TestEnqueueStale_ForceRegeneratesAll(t *testing.T) {
 	st := newStaleFakeStore()
 	now := time.Now()
 	earlier := now.Add(-time.Hour)
-	st.ideas = []model.Idea{{Slug: "x"}, {Slug: "y"}}
+	st.ideas = []model.Idea{
+		{Slug: "x", Description: "fresh line", Updated: now},
+		{Slug: "y", Description: "fresh line", Updated: now},
+	}
 	for _, slug := range []string{"x", "y"} {
 		st.sessions[slug] = []model.AgentSession{
 			{UUID: slug + "-s", Status: model.SessionStatusCompleted, Ended: ptrTime(earlier)},
-		}
-		st.summaries[slug] = model.Summary{
-			GeneratedAt: now, SourceSessionUUID: slug + "-s",
 		}
 	}
 
