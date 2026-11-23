@@ -123,6 +123,7 @@ func New(config LaunchConfig) *App {
 	cfg, _ := store.LoadConfig(ideasDir)
 	st := store.NewFSStore(ideasDir, ideatecfg.ReviewsDir(configDir), cfg.BranchPrefix, cfg.TrackingBranch)
 	st.SetSummaryBackend(cfg.Summary.Backend)
+	runOKFMigration(st)
 
 	a := &App{
 		coordinator:   coord,
@@ -170,6 +171,30 @@ func New(config LaunchConfig) *App {
 	registerTestAgentRunner(coord)
 
 	return a
+}
+
+// runOKFMigration converts legacy idea.md files once, before anything else
+// reads or watches the ideas dir. Failure never blocks startup: dual-read
+// keeps unconverted ideas readable.
+func runOKFMigration(st *store.FSStore) {
+	start := time.Now()
+	report, err := st.MigrateToOKF(context.Background())
+	if err != nil {
+		slog.Error("store: okf migration", slog.Any("err", err))
+		return
+	}
+	for slug, ferr := range report.Failed {
+		slog.Warn("store: okf migration skipped idea", slog.String("slug", slug), slog.Any("err", ferr))
+	}
+	if report.BackupDir == "" && report.Migrated == 0 && len(report.Failed) == 0 {
+		return
+	}
+	slog.Info("store: okf migration",
+		slog.String("backup", report.BackupDir),
+		slog.Int("migrated", report.Migrated),
+		slog.Int("folded", report.Folded),
+		slog.Int("failed", len(report.Failed)),
+		slog.Int64("ms", time.Since(start).Milliseconds()))
 }
 
 // newIdeaGetter builds the IdeaGetter callback registered with the

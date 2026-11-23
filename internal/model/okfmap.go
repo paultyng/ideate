@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"log/slog"
 	"maps"
 	"time"
@@ -217,8 +218,7 @@ func ideaFromConcept(c *okf.Concept) *Idea {
 	var archived *okf.Actor
 	var activeAfter *okf.Date
 
-	_, hasLegacyName := c.Extra["name"]
-	if hasLegacyName || isLegacyLifecycleStatus(c.Status) {
+	if isLegacyConcept(c) {
 		archived, activeAfter = parseLegacyIdeaFields(c, idea)
 	} else {
 		// Modern OKF-native shape: decode created/archived/active_after
@@ -338,6 +338,123 @@ func parseLegacyIdeaFields(c *okf.Concept, idea *Idea) (*okf.Actor, *okf.Date) {
 		}
 		return nil, nil
 	}
+}
+
+// IsLegacyIdeaFile reports whether data is a v0.1-shaped idea.md (a `name`
+// key, or an Ideate lifecycle word in the core `status` key) that the
+// dual-read path in ideaFromConcept would route through legacy parsing. An
+// empty file or one without frontmatter is not legacy (false, nil);
+// unparseable frontmatter returns an error.
+func IsLegacyIdeaFile(data []byte) (bool, error) {
+	c, err := okf.Parse(data)
+	if err != nil {
+		return false, fmt.Errorf("parsing okf concept: %w", err)
+	}
+	return isLegacyConcept(c), nil
+}
+
+// CheckLegacyParse guards against the parser silently dropping or
+// substituting a raw frontmatter value: it errors if a present `name` is not
+// a non-empty string, a present scalar `created`/`updated`/`pause_until` is
+// not a parseable time, a present `created`/`updated` left idea's field zero,
+// or `resources` is not a list, has a different length than idea.Resources,
+// or has entries with unknown keys or no `type`. It also errors on a legacy
+// file carrying `archived`/`active_after`, and on `pause_until` when status
+// is not paused (the parser discards both). Null and
+// "" count as absent; mapping-shaped times (OKF actors) skip the time check.
+// idea is the result of ParseIdeaFile(data).
+func CheckLegacyParse(data []byte, idea *Idea) error {
+	c, err := okf.Parse(data)
+	if err != nil {
+		return fmt.Errorf("parsing okf concept: %w", err)
+	}
+	raw := c.Extra
+
+	if v, ok := raw["name"]; ok && !isAbsentValue(v) {
+		if s, ok := v.(string); !ok || s == "" {
+			return fmt.Errorf("name %v is not a non-empty string", v)
+		}
+	}
+
+	for _, key := range []string{"created", "updated", "pause_until"} {
+		v, ok := raw[key]
+		if !ok || isAbsentValue(v) {
+			continue
+		}
+		if _, isMap := v.(map[string]any); isMap {
+			continue
+		}
+		if _, ok := parseLegacyTime(v); !ok {
+			return fmt.Errorf("%s %v is not a parseable time", key, v)
+		}
+	}
+
+	if v, ok := raw["created"]; ok && !isAbsentValue(v) && idea.Created.IsZero() {
+		return fmt.Errorf("created %v dropped by parse", v)
+	}
+	if v, ok := raw["updated"]; ok && !isAbsentValue(v) && idea.Updated.IsZero() {
+		return fmt.Errorf("updated %v dropped by parse", v)
+	}
+	if err := checkLegacyResources(raw["resources"], idea); err != nil {
+		return err
+	}
+
+	if isLegacyConcept(c) {
+		for _, key := range []string{"archived", "active_after"} {
+			if v, ok := raw[key]; ok && v != nil {
+				return fmt.Errorf("legacy file also carries %s, which the parser would discard", key)
+			}
+		}
+	}
+	if v, ok := raw["pause_until"]; ok && !isAbsentValue(v) && c.Status != string(StatusPaused) {
+		return fmt.Errorf("pause_until %v present on a non-paused idea, which the parser would discard", v)
+	}
+	return nil
+}
+
+// checkLegacyResources errors when the raw resources value is not a list, or
+// an entry has keys Resource does not carry or lacks the `type` the parser
+// would otherwise fill with "".
+func checkLegacyResources(v any, idea *Idea) error {
+	if v == nil {
+		return nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return fmt.Errorf("resources is %T, not a list", v)
+	}
+	if len(list) != len(idea.Resources) {
+		return fmt.Errorf("resources: parsed %d of %d entries", len(idea.Resources), len(list))
+	}
+	for i, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("resources[%d] is %T, not a mapping", i, item)
+		}
+		for k := range m {
+			switch k {
+			case "type", "url", "label", "status":
+			default:
+				return fmt.Errorf("resources[%d] has unknown key %q", i, k)
+			}
+		}
+		if _, ok := m["type"]; !ok {
+			return fmt.Errorf("resources[%d] lacks type", i)
+		}
+	}
+	return nil
+}
+
+// isAbsentValue reports whether a raw frontmatter value counts as absent.
+func isAbsentValue(v any) bool {
+	return v == nil || v == ""
+}
+
+// isLegacyConcept reports whether c carries v0.1 legacy markers: a `name`
+// key, or an Ideate lifecycle word repurposed into the core `status` key.
+func isLegacyConcept(c *okf.Concept) bool {
+	_, hasLegacyName := c.Extra["name"]
+	return hasLegacyName || isLegacyLifecycleStatus(c.Status)
 }
 
 // isLegacyLifecycleStatus reports whether an OKF core `status` value is one

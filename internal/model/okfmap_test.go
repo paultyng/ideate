@@ -542,3 +542,103 @@ func TestParseLegacyTime(t *testing.T) {
 		})
 	}
 }
+
+func TestIsLegacyIdeaFile(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+		wantErr bool
+	}{
+		{"legacy name and active status", "---\nname: Old\nstatus: active\nupdated: 2026-04-01T00:00:00Z\n---\nBody.\n", true, false},
+		{"legacy paused status only", "---\nstatus: paused\n---\nBody.\n", true, false},
+		{"okf concept", "---\ntype: Ideate Idea\ntitle: X\nupdated: 2026-04-01T00:00:00Z\n---\nBody.\n", false, false},
+		{"okf with unknown extra keys", "---\ntype: Ideate Idea\ntitle: X\nphase: design\nfoo: bar\nstatus: draft\n---\nBody.\n", false, false},
+		{"malformed yaml", "---\nname: [unclosed\n---\nBody.\n", false, true},
+		{"empty file", "", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := IsLegacyIdeaFile([]byte(tc.content))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("IsLegacyIdeaFile = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCheckLegacyParse(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		content string
+		wantErr bool
+	}{
+		{"name not a string", "---\nname: 123\nstatus: active\n---\nB\n", true},
+		{"name is a list", "---\nname: [a]\nstatus: active\n---\nB\n", true},
+		{"created not a date", "---\nname: X\nstatus: active\ncreated: not-a-date\n---\nB\n", true},
+		{"updated not a date", "---\nname: X\nstatus: active\nupdated: not-a-date\n---\nB\n", true},
+		{"paused with garbage pause_until", "---\nname: X\nstatus: paused\nupdated: 2026-04-01T00:00:00Z\npause_until: garbage\n---\nB\n", true},
+		{"active with valid leftover pause_until is dropped", "---\nname: X\nstatus: active\nupdated: 2026-04-01T00:00:00Z\npause_until: 2026-05-01\n---\nB\n", true},
+		{"active with null pause_until", "---\nname: X\nstatus: active\npause_until: null\n---\nB\n", false},
+		{"resources is a mapping", "---\nname: X\nstatus: active\nresources:\n    type: web\n---\nB\n", true},
+		{"resources is a scalar", "---\nname: X\nstatus: active\nresources: foo\n---\nB\n", true},
+		{"resources null", "---\nname: X\nstatus: active\nresources: null\n---\nB\n", false},
+		{"resource entry unknown key", "---\nname: X\nstatus: active\nresources:\n    - type: web\n      extra: 1\n---\nB\n", true},
+		{"resource entry lacks type", "---\nname: X\nstatus: active\nresources:\n    - url: https://e.com\n---\nB\n", true},
+		{"legacy with archived key", "---\nname: X\nstatus: active\narchived:\n    at: 2026-03-01T00:00:00Z\n---\nB\n", true},
+		{"legacy with active_after key", "---\nname: X\nstatus: paused\npause_until: 2026-05-01\nactive_after: 2026-06-01\n---\nB\n", true},
+		{"legacy lifecycle status with archived key", "---\ntype: Ideate Idea\ntitle: X\nstatus: archived\narchived:\n    at: 2026-03-01T00:00:00Z\n---\nB\n", true},
+		{"modern archived key", "---\ntype: Ideate Idea\ntitle: X\narchived:\n    at: 2026-03-01T00:00:00Z\n---\nB\n", false},
+		{"empty name is absent", "---\nname: \"\"\nstatus: active\n---\nB\n", false},
+		{"null created is absent", "---\nname: X\nstatus: active\ncreated: null\n---\nB\n", false},
+		{"empty updated is absent", "---\nname: X\nstatus: active\nupdated: \"\"\n---\nB\n", false},
+		{"valid legacy", "---\nname: X\nstatus: paused\ncreated: 2026-03-01T00:00:00Z\nupdated: 2026-04-01T00:00:00Z\npause_until: 2026-05-01T00:00:00Z\nresources:\n    - type: web\n      url: https://example.com\n---\nB\n", false},
+		{"okf concept with mapping created", "---\ntype: Ideate Idea\ntitle: X\ncreated:\n    at: 2026-03-01T00:00:00Z\nupdated: 2026-04-01T00:00:00Z\n---\nB\n", false},
+		{"okf mapping created with bad at is dropped", "---\ntype: Ideate Idea\ntitle: X\ncreated:\n    at: [1, 2]\n---\nB\n", true},
+		{"malformed resources entry is dropped", "---\nname: X\nstatus: active\nresources:\n    - just-a-string\n---\nB\n", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			idea, err := ParseIdeaFile(tc.content)
+			if err != nil {
+				t.Fatalf("ParseIdeaFile: %v", err)
+			}
+			err = CheckLegacyParse([]byte(tc.content), idea)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("CheckLegacyParse err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+
+	// Outcome checks against an idea whose fields the parser dropped,
+	// independent of how the parser behaves today.
+	t.Run("created present but parsed zero", func(t *testing.T) {
+		t.Parallel()
+		content := "---\nname: X\nstatus: active\ncreated: 2026-03-01T00:00:00Z\n---\nB\n"
+		if err := CheckLegacyParse([]byte(content), &Idea{Name: "X"}); err == nil {
+			t.Error("CheckLegacyParse = nil, want error for dropped created")
+		}
+	})
+	t.Run("updated present but parsed zero", func(t *testing.T) {
+		t.Parallel()
+		content := "---\nname: X\nstatus: active\nupdated: 2026-03-01T00:00:00Z\n---\nB\n"
+		if err := CheckLegacyParse([]byte(content), &Idea{Name: "X"}); err == nil {
+			t.Error("CheckLegacyParse = nil, want error for dropped updated")
+		}
+	})
+	t.Run("malformed yaml", func(t *testing.T) {
+		t.Parallel()
+		if err := CheckLegacyParse([]byte("---\nname: [unclosed\n---\n"), &Idea{}); err == nil {
+			t.Error("CheckLegacyParse = nil, want parse error")
+		}
+	})
+}
