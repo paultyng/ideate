@@ -123,6 +123,51 @@ test.describe('Dormant resume on navigation', () => {
     await page.waitForSelector('.terminal-container .xterm-screen', { timeout: 10000 })
   })
 
+  test('concurrent resume of one dormant session spawns once', async ({ page }) => {
+    test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
+
+    const slug = await createIdea(page, `Dormant Concurrent ${Date.now()}`)
+    const uuid = await createDormantSession(page, slug)
+
+    const results = await page.evaluate(
+      async ({ slug, uuid }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const app = (window as any).go.app.App
+        const settled = await Promise.allSettled([
+          app.ResumeIdeaSession(slug, uuid),
+          app.ResumeIdeaSession(slug, uuid),
+        ])
+        return settled.map((r) => ({
+          status: r.status,
+          reason: r.status === 'rejected' ? String(r.reason) : '',
+        }))
+      },
+      { slug, uuid },
+    )
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    const rejected = results.filter((r) => r.status === 'rejected')
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0].reason).toMatch(/already running/i)
+  })
+
+  test('double-click on dormant card resumes once', async ({ page }) => {
+    test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
+
+    const name = `Dormant Dblclick ${Date.now()}`
+    const slug = await createIdea(page, name)
+    const uuid = await createDormantSession(page, slug)
+
+    await page.goto('/')
+    const card = page.locator('.idea-card', { hasText: name })
+    await expect(card).toBeVisible({ timeout: 10000 })
+    await card.dblclick()
+
+    await expect(page).toHaveURL(new RegExp(`#/idea/${slug}/session/${uuid}$`), { timeout: 15000 })
+    await page.waitForSelector('.terminal-container .xterm-screen', { timeout: 10000 })
+    await expect(page.locator('.session-error, .idea-detail-error')).toHaveCount(0)
+  })
+
   test('terminated session: home card opens session-detail, NOT auto-resume', async ({ page }) => {
     test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
 
