@@ -386,7 +386,7 @@ func TestMigrateToOKF_LifecycleStates(t *testing.T) {
 	t.Parallel()
 	s, dir := newTestStore(t)
 	fixtures := map[string]string{
-		"active":         "---\nname: A\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-04-01T00:00:00Z\npause_until: 2026-05-01\n---\nA.\n",
+		"active":         "---\nname: A\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-04-01T00:00:00Z\n---\nA.\n",
 		"paused-dated":   legacyAlpha,
 		"paused-nodate":  "---\nname: P\nstatus: paused\nupdated: 2026-04-01T00:00:00Z\n---\nP.\n",
 		"archived":       legacyBeta,
@@ -441,6 +441,35 @@ func TestMigrateToOKF_SkipsFileChangedSinceScan(t *testing.T) {
 	}
 	if !fileExists(filepath.Join(dir, "alpha", "summary.json")) {
 		t.Error("summary.json removed for an idea that was not written")
+	}
+}
+
+func TestMigrateToOKF_SkipsSummaryChangedSinceScan(t *testing.T) {
+	t.Parallel()
+	s, dir := newTestStore(t)
+	writeTestFile(t, filepath.Join(dir, "alpha", "idea.md"), legacyAlpha)
+	writeTestFile(t, filepath.Join(dir, "alpha", "summary.json"), summaryJSON)
+
+	report := MigrationReport{Failed: map[string]error{}}
+	plan, err := s.planOKFMigration(report.Failed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := `{"line":"Newer line.","generated_at":"2026-05-01T10:00:00Z"}`
+	writeTestFile(t, filepath.Join(dir, "alpha", "summary.json"), changed)
+
+	report, err = s.applyOKFMigration(plan, report)
+	if err != nil {
+		t.Fatalf("applyOKFMigration: %v", err)
+	}
+	if report.Migrated != 0 || report.Failed["alpha"] == nil {
+		t.Errorf("report = %+v, want alpha failed and not migrated", report)
+	}
+	if got := readTestFile(t, filepath.Join(dir, "alpha", "idea.md")); got != legacyAlpha {
+		t.Errorf("idea.md rewritten despite changed summary.json:\n%s", got)
+	}
+	if got := readTestFile(t, filepath.Join(dir, "alpha", "summary.json")); got != changed {
+		t.Errorf("summary.json = %q, want untouched %q", got, changed)
 	}
 }
 

@@ -227,7 +227,8 @@ func (s *FSStore) applyOKFMigration(plan []migrationEntry, report MigrationRepor
 	report.BackupDir = backup
 
 	for _, entry := range plan {
-		if err := s.writeOKFEntry(entry); err != nil {
+		removeErr, err := s.writeOKFEntry(entry)
+		if err != nil {
 			report.Failed[entry.slug] = errors.Join(report.Failed[entry.slug], err)
 			continue
 		}
@@ -235,10 +236,8 @@ func (s *FSStore) applyOKFMigration(plan []migrationEntry, report MigrationRepor
 		if entry.folded {
 			report.Folded++
 		}
-		if entry.deleteSummary {
-			if err := os.Remove(filepath.Join(s.ideaDir(entry.slug), summaryFilename)); err != nil {
-				report.Failed[entry.slug] = errors.Join(report.Failed[entry.slug], fmt.Errorf("removing summary.json: %w", err))
-			}
+		if removeErr != nil {
+			report.Failed[entry.slug] = errors.Join(report.Failed[entry.slug], removeErr)
 		}
 	}
 
@@ -260,7 +259,11 @@ func (s *FSStore) backupOKFPlan(plan []migrationEntry) (string, error) {
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		return "", fmt.Errorf("creating backup dir: %w", err)
 	}
-	if err := copyOKFBackup(dir, s.ideasDir, plan); err != nil {
+	err := copyOKFBackup(dir, s.ideasDir, plan)
+	if err == nil {
+		err = errors.Join(syncDir(dir), syncDir(root))
+	}
+	if err != nil {
 		if rmErr := os.RemoveAll(dir); rmErr != nil {
 			err = errors.Join(err, fmt.Errorf("removing partial backup: %w", rmErr))
 		}
@@ -283,6 +286,9 @@ func copyOKFBackup(dir, ideasDir string, plan []migrationEntry) error {
 				return err
 			}
 		}
+		if err := syncDir(slugDir); err != nil {
+			return err
+		}
 	}
 	indexPath := filepath.Join(ideasDir, indexFilename)
 	info, err := os.Stat(indexPath)
@@ -299,36 +305,81 @@ func copyOKFBackup(dir, ideasDir string, plan []migrationEntry) error {
 	return writeBackupFile(filepath.Join(dir, indexFilename), data, info.Mode().Perm())
 }
 
+// writeBackupFile writes and fsyncs the file so the backup is durable before
+// any idea.md is replaced.
 func writeBackupFile(path string, data []byte, mode fs.FileMode) error {
-	if err := os.WriteFile(path, data, mode); err != nil {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
 		return err
 	}
-	return os.Chmod(path, mode)
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
-// writeOKFEntry writes entry.out under the slug lock, refusing if idea.md
-// changed since the scan, and confirms the bytes on disk afterwards.
-func (s *FSStore) writeOKFEntry(entry migrationEntry) error {
+// syncDir fsyncs a directory so its new entries survive a crash.
+func syncDir(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
+}
+
+// writeOKFEntry writes entry.out under the slug lock, refusing if idea.md or
+// summary.json changed since the scan, confirms the bytes on disk afterwards,
+// then removes summary.json. err means nothing was written; removeErr means
+// idea.md was written but summary.json could not be removed.
+func (s *FSStore) writeOKFEntry(entry migrationEntry) (removeErr, err error) {
 	unlock := s.locks.Lock(entry.slug)
 	defer unlock()
 
 	ideaPath := filepath.Join(s.ideaDir(entry.slug), ideaFilename)
+	summaryPath := filepath.Join(s.ideaDir(entry.slug), summaryFilename)
 	current, err := os.ReadFile(ideaPath)
 	if err != nil {
-		return fmt.Errorf("re-reading idea.md: %w", err)
+		return nil, fmt.Errorf("re-reading idea.md: %w", err)
 	}
 	if !bytes.Equal(current, entry.original) {
-		return errors.New("idea.md changed since scan")
+		return nil, errors.New("idea.md changed since scan")
+	}
+	if entry.deleteSummary {
+		sdata, err := os.ReadFile(summaryPath)
+		if err != nil {
+			return nil, fmt.Errorf("re-reading summary.json: %w", err)
+		}
+		if !bytes.Equal(sdata, entry.summary) {
+			return nil, errors.New("summary.json changed since scan")
+		}
 	}
 	if err := atomicfile.Write(ideaPath, entry.out, entry.originalMode); err != nil {
-		return fmt.Errorf("writing idea.md: %w", err)
+		return nil, fmt.Errorf("writing idea.md: %w", err)
 	}
 	written, err := os.ReadFile(ideaPath)
 	if err != nil {
-		return fmt.Errorf("reading back idea.md: %w", err)
+		return nil, fmt.Errorf("reading back idea.md: %w", err)
 	}
 	if !bytes.Equal(written, entry.out) {
-		return errors.New("idea.md read-back mismatch")
+		return nil, errors.New("idea.md read-back mismatch")
 	}
-	return nil
+	if entry.deleteSummary {
+		if err := os.Remove(summaryPath); err != nil {
+			return fmt.Errorf("removing summary.json: %w", err), nil
+		}
+	}
+	return nil, nil
 }

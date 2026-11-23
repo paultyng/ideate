@@ -181,6 +181,7 @@ func runOKFMigration(st *store.FSStore) {
 	report, err := st.MigrateToOKF(context.Background())
 	if err != nil {
 		slog.Error("store: okf migration", slog.Any("err", err))
+		return
 	}
 	for slug, ferr := range report.Failed {
 		slog.Warn("store: okf migration skipped idea", slog.String("slug", slug), slog.Any("err", ferr))

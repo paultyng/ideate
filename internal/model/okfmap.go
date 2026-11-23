@@ -357,7 +357,10 @@ func IsLegacyIdeaFile(data []byte) (bool, error) {
 // substituting a raw frontmatter value: it errors if a present `name` is not
 // a non-empty string, a present scalar `created`/`updated`/`pause_until` is
 // not a parseable time, a present `created`/`updated` left idea's field zero,
-// or a `resources` list has a different length than idea.Resources. Null and
+// or `resources` is not a list, has a different length than idea.Resources,
+// or has entries with unknown keys or no `type`. It also errors on a legacy
+// file carrying `archived`/`active_after`, and on `pause_until` when status
+// is not paused (the parser discards both). Null and
 // "" count as absent; mapping-shaped times (OKF actors) skip the time check.
 // idea is the result of ParseIdeaFile(data).
 func CheckLegacyParse(data []byte, idea *Idea) error {
@@ -392,8 +395,52 @@ func CheckLegacyParse(data []byte, idea *Idea) error {
 	if v, ok := raw["updated"]; ok && !isAbsentValue(v) && idea.Updated.IsZero() {
 		return fmt.Errorf("updated %v dropped by parse", v)
 	}
-	if list, ok := raw["resources"].([]any); ok && len(list) != len(idea.Resources) {
+	if err := checkLegacyResources(raw["resources"], idea); err != nil {
+		return err
+	}
+
+	if isLegacyConcept(c) {
+		for _, key := range []string{"archived", "active_after"} {
+			if v, ok := raw[key]; ok && v != nil {
+				return fmt.Errorf("legacy file also carries %s, which the parser would discard", key)
+			}
+		}
+	}
+	if v, ok := raw["pause_until"]; ok && !isAbsentValue(v) && c.Status != string(StatusPaused) {
+		return fmt.Errorf("pause_until %v present on a non-paused idea, which the parser would discard", v)
+	}
+	return nil
+}
+
+// checkLegacyResources errors when the raw resources value is not a list, or
+// an entry has keys Resource does not carry or lacks the `type` the parser
+// would otherwise fill with "".
+func checkLegacyResources(v any, idea *Idea) error {
+	if v == nil {
+		return nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return fmt.Errorf("resources is %T, not a list", v)
+	}
+	if len(list) != len(idea.Resources) {
 		return fmt.Errorf("resources: parsed %d of %d entries", len(idea.Resources), len(list))
+	}
+	for i, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("resources[%d] is %T, not a mapping", i, item)
+		}
+		for k := range m {
+			switch k {
+			case "type", "url", "label", "status":
+			default:
+				return fmt.Errorf("resources[%d] has unknown key %q", i, k)
+			}
+		}
+		if _, ok := m["type"]; !ok {
+			return fmt.Errorf("resources[%d] lacks type", i)
+		}
 	}
 	return nil
 }
