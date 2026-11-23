@@ -7,25 +7,11 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 // ErrSessionStarting is returned by Start when the uuid is already starting or running.
 var ErrSessionStarting = errors.New("session already starting or running")
-
-// exitGoroutineHook, when set by tests, runs in the exit goroutine after the
-// process exits and before it takes c.mu.
-var exitGoroutineHook atomic.Pointer[func(uuid string)]
-
-func sessionFinished(s *Session) bool {
-	select {
-	case <-s.Wait():
-		return true
-	default:
-		return false
-	}
-}
 
 // SessionMeta tracks the idea context for a running session.
 type SessionMeta struct {
@@ -133,11 +119,7 @@ func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (str
 	config.SessionID = uuid
 
 	c.mu.Lock()
-	_, busy := c.starting[uuid]
-	if old := c.sessions[uuid]; old != nil && !sessionFinished(old) {
-		busy = true
-	}
-	if busy {
+	if _, busy := c.starting[uuid]; busy || c.sessions[uuid] != nil {
 		c.mu.Unlock()
 		slog.Info("coordinator: session start rejected",
 			slog.String("uuid", uuid),
@@ -180,10 +162,6 @@ func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (str
 		AgentType: config.AgentType,
 	}
 	c.mu.Lock()
-	if c.sessions[uuid] != nil {
-		// Replacing a finished-but-uncleaned entry: drop its stale stop reason.
-		delete(c.stopReasons, uuid)
-	}
 	c.sessions[uuid] = session
 	c.sessionMetas[uuid] = ownMeta
 	c.mu.Unlock()
@@ -212,14 +190,10 @@ func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (str
 
 	go func() {
 		<-session.Wait()
-		if hook := exitGoroutineHook.Load(); hook != nil {
-			(*hook)(uuid)
-		}
 		meta := ownMeta
 		c.mu.Lock()
-		// A successor that replaced this session owns every uuid-keyed resource; skip all cleanup.
-		owned := c.sessions[uuid] == session
-		if owned {
+		// Skip cleanup if a different session now owns this uuid.
+		if c.sessions[uuid] == session {
 			if c.configDir != "" {
 				if err := removeManifest(c.configDir, uuid); err != nil {
 					slog.Warn("coordinator: removing manifest on exit",
@@ -231,9 +205,6 @@ func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (str
 		}
 		onStatusChange := c.onStatusChange
 		c.mu.Unlock()
-		if !owned {
-			return
-		}
 
 		session.mu.Lock()
 		status := session.status
