@@ -188,3 +188,102 @@ func TestStartIdeaSession_ResumeConcurrentSameUUID(t *testing.T) {
 		t.Error("ValidateSession false after resume")
 	}
 }
+
+func TestStartIdeaSession_ResumingKeyHeld(t *testing.T) {
+	a, runner, slug, uuid := newResumeGuardApp(t, nil)
+	t.Setenv("IDEATE_IDEAS_DIR", a.ideasDir)
+	a.mcpManager.RegisterSession(uuid)
+	a.resuming.Store(uuid, struct{}{})
+
+	_, err := a.StartIdeaSession(slug, "testagent", true)
+	requireInUse(t, err, uuid)
+	if got := runner.calls.Load(); got != 0 {
+		t.Errorf("Run calls = %d, want 0", got)
+	}
+	if !a.mcpManager.ValidateSession(uuid) {
+		t.Error("MCP registration lost on rejected resume")
+	}
+	if _, held := a.resuming.Load(uuid); !held {
+		t.Error("loser released the winner's guard key")
+	}
+}
+
+func TestAutoResume_ResumingKeyHeld(t *testing.T) {
+	a, runner, slug, uuid := newResumeGuardApp(t, nil)
+	a.mcpManager.RegisterSession(uuid)
+	a.resuming.Store(uuid, struct{}{})
+
+	err := a.resumeSession(ResumeCandidate{Slug: slug, IdeaName: "Guard", UUID: uuid, AgentType: "testagent"})
+	requireInUse(t, err, uuid)
+	if got := runner.calls.Load(); got != 0 {
+		t.Errorf("Run calls = %d, want 0", got)
+	}
+	if !a.mcpManager.ValidateSession(uuid) {
+		t.Error("MCP registration lost on skipped auto-resume")
+	}
+	if _, held := a.resuming.Load(uuid); !held {
+		t.Error("loser released the winner's guard key")
+	}
+
+}
+
+// startCoordinatorBlocked puts the coordinator into the starting state for
+// uuid (blocked in Run) without holding a.resuming.
+func startCoordinatorBlocked(t *testing.T, a *App, runner *countingRunner, gate chan struct{}, slug, uuid string) <-chan error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.coordinator.Start(context.Background(), agent.SessionConfig{
+			Name: "Guard", WorkingDir: t.TempDir(), AgentType: "testagent",
+			IdeaSlug: slug, ResumeUUID: uuid,
+		})
+		done <- err
+	}()
+	for deadline := time.Now().Add(30 * time.Second); runner.calls.Load() == 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("coordinator Start never reached Run")
+		}
+	}
+	return done
+}
+
+func TestResumeIdeaSession_CoordinatorStartingMapsToInUse(t *testing.T) {
+	gate := make(chan struct{})
+	a, runner, slug, uuid := newResumeGuardApp(t, gate)
+	a.mcpManager.RegisterSession(uuid)
+	done := startCoordinatorBlocked(t, a, runner, gate, slug, uuid)
+
+	_, err := a.ResumeIdeaSession(slug, uuid)
+	requireInUse(t, err, uuid)
+	if !a.mcpManager.ValidateSession(uuid) {
+		t.Error("MCP registration dropped on ErrSessionStarting")
+	}
+	if _, held := a.resuming.Load(uuid); held {
+		t.Error("resume guard key not released")
+	}
+	close(gate)
+	if err := <-done; err != nil {
+		t.Fatalf("blocked Start: %v", err)
+	}
+}
+
+func TestStartIdeaSession_CoordinatorStartingMapsToInUse(t *testing.T) {
+	gate := make(chan struct{})
+	a, runner, slug, uuid := newResumeGuardApp(t, gate)
+	t.Setenv("IDEATE_IDEAS_DIR", a.ideasDir)
+	a.mcpManager.RegisterSession(uuid)
+	done := startCoordinatorBlocked(t, a, runner, gate, slug, uuid)
+
+	_, err := a.StartIdeaSession(slug, "testagent", true)
+	requireInUse(t, err, uuid)
+	if !a.mcpManager.ValidateSession(uuid) {
+		t.Error("MCP registration dropped on ErrSessionStarting")
+	}
+	if _, held := a.resuming.Load(uuid); held {
+		t.Error("resume guard key not released")
+	}
+	close(gate)
+	if err := <-done; err != nil {
+		t.Fatalf("blocked Start: %v", err)
+	}
+}

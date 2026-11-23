@@ -334,7 +334,19 @@ func (a *App) GetSessionReplay(id string) (string, error) {
 
 // navigate is the callback passed to the IPC server.
 
-func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionStartResult, error) {
+func (a *App) StartIdeaSession(slug, agentType string, resume bool) (res *SessionStartResult, err error) {
+	startedAt := time.Now()
+	defer func() {
+		attrs := []any{slog.String("slug", slug), slog.Int64("total_ms", time.Since(startedAt).Milliseconds())}
+		if res != nil {
+			attrs = append(attrs, slog.String("uuid", res.UUID))
+		}
+		if err != nil {
+			attrs = append(attrs, slog.Any("err", err))
+		}
+		slog.Info("app: start timing", attrs...)
+	}()
+
 	idea, err := a.svc.Get(a.ctx, slug)
 	if err != nil {
 		return nil, fmt.Errorf("loading idea: %w", err)
@@ -479,7 +491,20 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 //
 // Errors when: idea archived, session not found for slug, session is
 // still running (no-op-resume guard), agent type doesn't support resume.
-func (a *App) ResumeIdeaSession(slug, sessionUUID string) (*SessionStartResult, error) {
+func (a *App) ResumeIdeaSession(slug, sessionUUID string) (res *SessionStartResult, err error) {
+	startedAt := time.Now()
+	defer func() {
+		attrs := []any{
+			slog.String("uuid", sessionUUID),
+			slog.String("slug", slug),
+			slog.Int64("total_ms", time.Since(startedAt).Milliseconds()),
+		}
+		if err != nil {
+			attrs = append(attrs, slog.Any("err", err))
+		}
+		slog.Info("app: resume timing", attrs...)
+	}()
+
 	if slug == "" {
 		return nil, fmt.Errorf("slug is required")
 	}

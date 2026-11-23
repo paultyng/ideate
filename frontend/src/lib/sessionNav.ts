@@ -147,7 +147,7 @@ export function useNavigateToIdeaSession(): (
           navigate(`/idea/${slug}/session/${uuid}`)
           focusTerminal(uuid)
         } catch (err) {
-          if (/already running|stuck in running/i.test(String(err))) {
+          if (/already running/i.test(String(err))) {
             navigate(`/idea/${slug}/session/${uuid}`)
             focusTerminal(uuid)
           } else {

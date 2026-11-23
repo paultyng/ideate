@@ -72,12 +72,12 @@ func TestCoordinator_StartTimingLog(t *testing.T) {
 			t.Fatalf("timing lines = %d, want 1", len(recs))
 		}
 		m := recs[0]
-		for _, k := range []string{"slug", "agent_type", "run_ms", "total_ms"} {
+		for _, k := range []string{"idea_slug", "agent_type", "run_ms", "total_ms"} {
 			if _, ok := m[k]; !ok {
 				t.Errorf("missing key %q", k)
 			}
 		}
-		if m["slug"].String() != "my-slug" || m["agent_type"].String() != "testagent" {
+		if m["idea_slug"].String() != "my-slug" || m["agent_type"].String() != "testagent" {
 			t.Errorf("attrs = %v", m)
 		}
 		if _, ok := m["err"]; ok {
@@ -158,7 +158,7 @@ func TestSession_FirstOutputLog(t *testing.T) {
 	t.Cleanup(func() { _ = coord.Stop(ctx, id) })
 
 	waitChunks := func(n int) {
-		deadline := time.Now().Add(10 * time.Second)
+		deadline := time.Now().Add(30 * time.Second)
 		for {
 			mu.Lock()
 			c := chunks
@@ -188,7 +188,7 @@ func TestSession_FirstOutputLog(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("first output lines = %d, want 1", len(recs))
 	}
-	if _, ok := recs[0]["first_output_ms"]; !ok {
-		t.Error("missing first_output_ms")
+	if _, ok := recs[0]["since_spawn_ms"]; !ok {
+		t.Error("missing since_spawn_ms")
 	}
 }

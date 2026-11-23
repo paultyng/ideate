@@ -170,11 +170,17 @@ func (r *ClaudeCodeRunner) Run(_ context.Context, config SessionConfig, outputFu
 				if err == nil {
 					repos = max(len(ideaCtx.AddDirs)-1, 0)
 				}
-				slog.Info("claude: idea context built",
+				attrs := []any{
 					slog.String("uuid", config.SessionID),
 					slog.String("slug", config.IdeaSlug),
 					slog.Int("repos", repos),
-					slog.Int64("ms", time.Since(ideaStart).Milliseconds()))
+					slog.Int64("ms", time.Since(ideaStart).Milliseconds()),
+				}
+				if err != nil {
+					slog.Warn("claude: idea context built", append(attrs, slog.Any("err", err))...)
+				} else {
+					slog.Info("claude: idea context built", attrs...)
+				}
 				if err == nil {
 					ccConfig.SystemPrompt = claudecode.BuildSystemPrompt(ideaCtx.Idea)
 					ccConfig.AddDirs = ideaCtx.AddDirs

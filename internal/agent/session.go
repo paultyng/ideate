@@ -194,7 +194,7 @@ func (s *Session) drainLoop(outputCh <-chan []byte, outputFunc OutputFunc, drain
 			first = false
 			slog.Info("session: first output",
 				slog.String("uuid", s.id),
-				slog.Int64("first_output_ms", time.Since(s.startedAt).Milliseconds()))
+				slog.Int64("since_spawn_ms", time.Since(s.startedAt).Milliseconds()))
 		}
 		s.screen.Feed(chunk)
 		s.lastReadAt.Store(time.Now().UnixNano())
