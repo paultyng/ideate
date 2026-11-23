@@ -3,11 +3,14 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -320,5 +323,138 @@ func TestCoordinator_Shutdown(t *testing.T) {
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
+	}
+}
+
+type gatingRunner struct {
+	inner AgentRunner
+	gate  chan struct{}
+	calls atomic.Int32
+}
+
+func (g *gatingRunner) Run(ctx context.Context, cfg SessionConfig, out OutputFunc) (*Session, error) {
+	g.calls.Add(1)
+	if g.gate != nil {
+		<-g.gate
+	}
+	return g.inner.Run(ctx, cfg, out)
+}
+
+type errorRunner struct{}
+
+func (errorRunner) Run(context.Context, SessionConfig, OutputFunc) (*Session, error) {
+	return nil, errors.New("boom")
+}
+
+func TestCoordinator_StartConcurrentSameUUID(t *testing.T) {
+	t.Parallel()
+	requirePTY(t)
+
+	bin := buildTestAgent(t)
+	coord := NewCoordinator(t.TempDir())
+	gr := &gatingRunner{inner: &TestAgentRunner{BinaryPath: bin}, gate: make(chan struct{})}
+	coord.RegisterRunner("testagent", gr)
+	t.Cleanup(func() { _ = coord.Stop(context.Background(), "dup-uuid") })
+
+	cfg := SessionConfig{Name: "dup", WorkingDir: t.TempDir(), AgentUUID: "dup-uuid", AgentType: "testagent"}
+	const n = 8
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := coord.Start(context.Background(), cfg)
+			errs <- err
+		}()
+	}
+	// Losers return immediately; the winner is blocked on the gate.
+	for i := 0; i < n-1; i++ {
+		select {
+		case err := <-errs:
+			if !errors.Is(err, ErrSessionStarting) {
+				t.Fatalf("loser err = %v, want ErrSessionStarting", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("timed out waiting for rejected starts")
+		}
+	}
+	close(gr.gate)
+	wg.Wait()
+	if err := <-errs; err != nil {
+		t.Fatalf("winner Start: %v", err)
+	}
+	if got := gr.calls.Load(); got != 1 {
+		t.Errorf("Run calls = %d, want 1", got)
+	}
+	if !coord.IsRunning("dup-uuid") {
+		t.Error("expected session running")
+	}
+	// A start while the session is live is also rejected.
+	if _, err := coord.Start(context.Background(), cfg); !errors.Is(err, ErrSessionStarting) {
+		t.Errorf("start of running uuid err = %v, want ErrSessionStarting", err)
+	}
+}
+
+func TestCoordinator_StartFailedRunClearsInFlight(t *testing.T) {
+	t.Parallel()
+	requirePTY(t)
+
+	bin := buildTestAgent(t)
+	coord := NewCoordinator(t.TempDir())
+	cfg := SessionConfig{Name: "retry", WorkingDir: t.TempDir(), AgentUUID: "retry-uuid", AgentType: "testagent"}
+
+	coord.RegisterRunner("testagent", errorRunner{})
+	if _, err := coord.Start(context.Background(), cfg); err == nil || errors.Is(err, ErrSessionStarting) {
+		t.Fatalf("first Start err = %v, want run failure", err)
+	}
+	if coord.IsRunning("retry-uuid") {
+		t.Fatal("failed start left a session")
+	}
+
+	coord.RegisterRunner("testagent", &TestAgentRunner{BinaryPath: bin})
+	if _, err := coord.Start(context.Background(), cfg); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	t.Cleanup(func() { _ = coord.Stop(context.Background(), "retry-uuid") })
+}
+
+func TestCoordinator_StartExitThenRestart(t *testing.T) {
+	t.Parallel()
+	requirePTY(t)
+
+	bin := buildTestAgent(t)
+	configDir := t.TempDir()
+	coord := NewCoordinator(configDir)
+	coord.RegisterRunner("testagent", &TestAgentRunner{BinaryPath: bin})
+	ctx := context.Background()
+	cfg := SessionConfig{Name: "again", WorkingDir: t.TempDir(), AgentUUID: "again-uuid", AgentType: "testagent"}
+
+	if _, err := coord.Start(ctx, cfg); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	if err := coord.Stop(ctx, "again-uuid"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for coord.IsRunning("again-uuid") {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for exit")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if _, err := coord.Start(ctx, cfg); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	t.Cleanup(func() { _ = coord.Stop(ctx, "again-uuid") })
+
+	// Restart after exit must write a fresh manifest.
+	time.Sleep(200 * time.Millisecond)
+	if _, err := os.Stat(manifestPath(configDir, "again-uuid")); err != nil {
+		t.Errorf("restarted session manifest missing: %v", err)
+	}
+	if !coord.IsRunning("again-uuid") {
+		t.Error("restarted session not running")
 	}
 }

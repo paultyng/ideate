@@ -671,6 +671,13 @@ func (a *App) resumeSession(c ResumeCandidate) error {
 		config.IdeaSlug = ""
 	}
 
+	if _, loaded := a.resuming.LoadOrStore(c.UUID, struct{}{}); loaded {
+		slog.Info("auto-resume skipped: resume already in flight",
+			slog.String("slug", c.Slug), slog.String("uuid", c.UUID))
+		return &SessionInUseError{UUID: c.UUID, Err: ErrSessionAlreadyRunning}
+	}
+	defer a.resuming.Delete(c.UUID)
+
 	if _, err := a.coordinator.Start(context.Background(), config); err != nil {
 		return fmt.Errorf("starting agent: %w", err)
 	}

@@ -2,12 +2,16 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"sync"
 	"time"
 )
+
+// ErrSessionStarting is returned by Start when the uuid is already starting or running.
+var ErrSessionStarting = errors.New("session already starting or running")
 
 // SessionMeta tracks the idea context for a running session.
 type SessionMeta struct {
@@ -19,6 +23,7 @@ type SessionMeta struct {
 type AgentCoordinator struct {
 	mu             sync.RWMutex
 	sessions       map[string]*Session
+	starting       map[string]struct{} // uuids with a Start in flight
 	runners        map[string]AgentRunner
 	sessionMetas   map[string]SessionMeta // uuid → meta
 	stopReasons    map[string]StopReason  // uuid → reason stashed before process exit
@@ -41,6 +46,7 @@ const (
 func NewCoordinator(configDir string) *AgentCoordinator {
 	return &AgentCoordinator{
 		sessions:     make(map[string]*Session),
+		starting:     make(map[string]struct{}),
 		runners:      make(map[string]AgentRunner),
 		sessionMetas: make(map[string]SessionMeta),
 		stopReasons:  make(map[string]StopReason),
@@ -93,6 +99,7 @@ func (c *AgentCoordinator) SetStatusHandler(fn func(uuid string, meta SessionMet
 // Either config.AgentUUID (new) or config.ResumeUUID (existing) must be set;
 // the coordinator keys all live state on this UUID.
 func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (string, error) {
+	startedAt := time.Now()
 	c.mu.RLock()
 	runner, ok := c.runners[config.AgentType]
 	onOutput := c.onOutput
@@ -111,23 +118,52 @@ func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (str
 	}
 	config.SessionID = uuid
 
+	c.mu.Lock()
+	if _, busy := c.starting[uuid]; busy || c.sessions[uuid] != nil {
+		c.mu.Unlock()
+		slog.Info("coordinator: session start rejected",
+			slog.String("uuid", uuid),
+			slog.String("idea_slug", config.IdeaSlug))
+		return "", fmt.Errorf("%w: uuid=%s", ErrSessionStarting, uuid)
+	}
+	c.starting[uuid] = struct{}{}
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.starting, uuid)
+		c.mu.Unlock()
+	}()
+
 	outputFunc := func(data []byte) {
 		if onOutput != nil {
 			onOutput(uuid, data)
 		}
 	}
 
+	runStart := time.Now()
 	session, err := runner.Run(ctx, config, outputFunc)
+	timingAttrs := []any{
+		slog.String("uuid", uuid),
+		slog.String("idea_slug", config.IdeaSlug),
+		slog.String("agent_type", config.AgentType),
+		slog.Int64("run_ms", time.Since(runStart).Milliseconds()),
+		slog.Int64("total_ms", time.Since(startedAt).Milliseconds()),
+	}
+	if err != nil {
+		timingAttrs = append(timingAttrs, slog.Any("err", err))
+	}
+	slog.Info("coordinator: session start timing", timingAttrs...)
 	if err != nil {
 		return "", fmt.Errorf("starting agent session: %w", err)
 	}
 
-	c.mu.Lock()
-	c.sessions[uuid] = session
-	c.sessionMetas[uuid] = SessionMeta{
+	ownMeta := SessionMeta{
 		IdeaSlug:  config.IdeaSlug,
 		AgentType: config.AgentType,
 	}
+	c.mu.Lock()
+	c.sessions[uuid] = session
+	c.sessionMetas[uuid] = ownMeta
 	c.mu.Unlock()
 
 	slog.Info("coordinator: session started",
@@ -154,19 +190,21 @@ func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (str
 
 	go func() {
 		<-session.Wait()
+		meta := ownMeta
 		c.mu.Lock()
-		meta := c.sessionMetas[uuid]
-		delete(c.sessions, uuid)
-		delete(c.sessionMetas, uuid)
+		// Defensive: Start rejects a present uuid, so this is always true today.
+		if c.sessions[uuid] == session {
+			if c.configDir != "" {
+				if err := removeManifest(c.configDir, uuid); err != nil {
+					slog.Warn("coordinator: removing manifest on exit",
+						slog.String("uuid", uuid), slog.Any("err", err))
+				}
+			}
+			delete(c.sessions, uuid)
+			delete(c.sessionMetas, uuid)
+		}
 		onStatusChange := c.onStatusChange
 		c.mu.Unlock()
-
-		if c.configDir != "" {
-			if err := removeManifest(c.configDir, uuid); err != nil {
-				slog.Warn("coordinator: removing manifest on exit",
-					slog.String("uuid", uuid), slog.Any("err", err))
-			}
-		}
 
 		session.mu.Lock()
 		status := session.status
