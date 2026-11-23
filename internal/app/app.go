@@ -62,6 +62,7 @@ type App struct {
 	store          *store.FSStore
 	svc            *service.IdeaService
 	mcpManager     *ideateMCP.Manager
+	resuming       sync.Map // uuid -> struct{}; per-uuid resume guard
 	hooksHandler   claudecode.HookHandler
 	events         *pubsub.Broker[pubsub.Event]
 	eventBridge    chan struct{} // closed by startEventBridge to signal exit

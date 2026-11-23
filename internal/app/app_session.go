@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -384,6 +385,16 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 		config.AgentUUID = sessionUUID
 	}
 
+	if resume {
+		if _, loaded := a.resuming.LoadOrStore(sessionUUID, struct{}{}); loaded {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
+		defer a.resuming.Delete(sessionUUID)
+		if a.coordinator.IsRunning(sessionUUID) {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
+	}
+
 	// Register the MCP server instance for this session BEFORE spawning
 	// the agent process. The agent connects to /mcp during boot; if the
 	// connect lands before RegisterSession runs, the MCP handler logs
@@ -402,6 +413,9 @@ func (a *App) StartIdeaSession(slug, agentType string, resume bool) (*SessionSta
 	// Start the agent process BEFORE writing to the store. If start fails,
 	// no orphaned "running" records are left behind.
 	if _, err := a.coordinator.Start(a.ctx, config); err != nil {
+		if errors.Is(err, agent.ErrSessionStarting) {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
 		if a.mcpManager != nil {
 			a.mcpManager.UnregisterSession(sessionUUID)
 		}
@@ -500,10 +514,21 @@ func (a *App) ResumeIdeaSession(slug, sessionUUID string) (*SessionStartResult, 
 		ResumeUUID: sessionUUID,
 	}
 
+	if _, loaded := a.resuming.LoadOrStore(sessionUUID, struct{}{}); loaded {
+		return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+	}
+	defer a.resuming.Delete(sessionUUID)
+	if a.coordinator.IsRunning(sessionUUID) {
+		return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+	}
+
 	if a.mcpManager != nil {
 		a.mcpManager.RegisterSession(sessionUUID)
 	}
 	if _, err := a.coordinator.Start(a.ctx, config); err != nil {
+		if errors.Is(err, agent.ErrSessionStarting) {
+			return nil, &SessionInUseError{UUID: sessionUUID, Err: ErrSessionAlreadyRunning}
+		}
 		if a.mcpManager != nil {
 			a.mcpManager.UnregisterSession(sessionUUID)
 		}
