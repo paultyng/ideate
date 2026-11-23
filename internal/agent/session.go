@@ -188,7 +188,14 @@ func (s *Session) readLoop(outputCh chan []byte, drainDone <-chan struct{}) {
 // sequence s.done after all output is persisted.
 func (s *Session) drainLoop(outputCh <-chan []byte, outputFunc OutputFunc, drainDone chan<- struct{}) {
 	defer close(drainDone)
+	first := true
 	for chunk := range outputCh {
+		if first {
+			first = false
+			slog.Info("session: first output",
+				slog.String("uuid", s.id),
+				slog.Int64("first_output_ms", time.Since(s.startedAt).Milliseconds()))
+		}
 		s.screen.Feed(chunk)
 		s.lastReadAt.Store(time.Now().UnixNano())
 		if s.debugWriter != nil {

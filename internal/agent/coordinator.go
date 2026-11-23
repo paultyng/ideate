@@ -99,6 +99,7 @@ func (c *AgentCoordinator) SetStatusHandler(fn func(uuid string, meta SessionMet
 // Either config.AgentUUID (new) or config.ResumeUUID (existing) must be set;
 // the coordinator keys all live state on this UUID.
 func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (string, error) {
+	startedAt := time.Now()
 	c.mu.RLock()
 	runner, ok := c.runners[config.AgentType]
 	onOutput := c.onOutput
@@ -139,7 +140,19 @@ func (c *AgentCoordinator) Start(ctx context.Context, config SessionConfig) (str
 		}
 	}
 
+	runStart := time.Now()
 	session, err := runner.Run(ctx, config, outputFunc)
+	timingAttrs := []any{
+		slog.String("uuid", uuid),
+		slog.String("slug", config.IdeaSlug),
+		slog.String("agent_type", config.AgentType),
+		slog.Int64("run_ms", time.Since(runStart).Milliseconds()),
+		slog.Int64("total_ms", time.Since(startedAt).Milliseconds()),
+	}
+	if err != nil {
+		timingAttrs = append(timingAttrs, slog.Any("err", err))
+	}
+	slog.Info("coordinator: session start timing", timingAttrs...)
 	if err != nil {
 		return "", fmt.Errorf("starting agent session: %w", err)
 	}

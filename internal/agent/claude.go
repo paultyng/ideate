@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,7 +164,17 @@ func (r *ClaudeCodeRunner) Run(_ context.Context, config SessionConfig, outputFu
 
 		if config.IdeaSlug != "" {
 			if r.IdeaGetter != nil {
+				ideaStart := time.Now()
 				ideaCtx, err := r.IdeaGetter(config.IdeaSlug)
+				repos := 0
+				if err == nil {
+					repos = max(len(ideaCtx.AddDirs)-1, 0)
+				}
+				slog.Info("claude: idea context built",
+					slog.String("uuid", config.SessionID),
+					slog.String("slug", config.IdeaSlug),
+					slog.Int("repos", repos),
+					slog.Int64("ms", time.Since(ideaStart).Milliseconds()))
 				if err == nil {
 					ccConfig.SystemPrompt = claudecode.BuildSystemPrompt(ideaCtx.Idea)
 					ccConfig.AddDirs = ideaCtx.AddDirs

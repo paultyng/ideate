@@ -320,10 +320,15 @@ func (a *App) ListSessions() []agent.SessionInfo {
 // The returned string is base64-encoded.
 
 func (a *App) GetSessionReplay(id string) (string, error) {
+	start := time.Now()
 	data, err := a.coordinator.GetSessionReplay(id)
 	if err != nil {
 		return "", err
 	}
+	slog.Info("app: session replay",
+		slog.String("uuid", id),
+		slog.Int64("ms", time.Since(start).Milliseconds()),
+		slog.Int("bytes", len(data)))
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
