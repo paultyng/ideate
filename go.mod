@@ -7,7 +7,7 @@ require (
 	github.com/charmbracelet/x/vt v0.0.0-20260531005911-0ca8ababeab2
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/go-git/go-billy/v6 v6.0.0-alpha.1
+	github.com/go-git/go-billy/v6 v6.0.0-beta.1
 	github.com/go-git/go-git/v6 v6.0.0-alpha.4
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v1.6.0
