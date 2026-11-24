@@ -32,7 +32,7 @@ jobs:
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
           go install github.com/bufbuild/buf/cmd/buf@v1.70.0
-          go install github.com/go-task/task/v3/cmd/task@v3.51.1
+          go install github.com/go-task/task/v3/cmd/task@v3.54.0
           brew install create-dmg
 
       - name: Import signing certificate
