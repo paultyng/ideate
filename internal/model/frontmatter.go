@@ -1,11 +1,10 @@
 package model
 
 import (
-	"bytes"
 	"fmt"
-	"log/slog"
 	"strings"
 
+	okf "github.com/paultyng/go-okf"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,46 +40,23 @@ func ParseFrontmatter(content string) (yamlStr string, body string, err error) {
 	return yamlStr, body, nil
 }
 
-// ParseIdeaFile reads an idea.md file content and returns an Idea with its Summary populated.
+// ParseIdeaFile reads an idea.md file content and returns an Idea with its
+// Summary populated. Serialization is OKF-native (see okfmap.go); this also
+// dual-reads legacy v0.1-shaped frontmatter (name/status/pause_until) so a
+// pre-migration idea.md still loads correctly.
 func ParseIdeaFile(content string) (*Idea, error) {
-	yamlStr, body, err := ParseFrontmatter(content)
+	c, err := okf.Parse([]byte(content))
 	if err != nil {
-		return nil, fmt.Errorf("parsing frontmatter: %w", err)
+		return nil, fmt.Errorf("parsing okf concept: %w", err)
 	}
-
-	idea := &Idea{}
-	if yamlStr != "" {
-		if err := yaml.Unmarshal([]byte(yamlStr), idea); err != nil {
-			return nil, fmt.Errorf("unmarshaling frontmatter: %w", err)
-		}
-	}
-	if idea.Status != "" && idea.Status != StatusActive && idea.Status != StatusPaused && idea.Status != StatusArchived {
-		slog.Debug("read-repaired unknown status",
-			slog.String("got", string(idea.Status)),
-			slog.String("repaired_to", "active"))
-		idea.Status = StatusActive
-	}
-	idea.Summary = body
-	return idea, nil
+	return ideaFromConcept(c), nil
 }
 
-// SerializeIdeaFile creates the content of an idea.md from an Idea struct.
+// SerializeIdeaFile creates the content of an idea.md from an Idea struct,
+// as an OKF concept document (see okfmap.go).
 func SerializeIdeaFile(idea *Idea) (string, error) {
-	var buf bytes.Buffer
-
-	yamlBytes, err := yaml.Marshal(idea)
-	if err != nil {
-		return "", fmt.Errorf("marshaling frontmatter: %w", err)
-	}
-
-	buf.WriteString(frontmatterDelim + "\n")
-	buf.Write(yamlBytes)
-	buf.WriteString(frontmatterDelim + "\n")
-	if idea.Summary != "" {
-		buf.WriteString(idea.Summary)
-	}
-
-	return buf.String(), nil
+	c := conceptFromIdea(idea)
+	return string(c.Bytes()), nil
 }
 
 // MarkdownFile represents a non-idea markdown file with optional resource frontmatter.
