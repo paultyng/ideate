@@ -20,7 +20,7 @@ type fakeStore struct {
 	ideas       map[string]*model.Idea
 	sessions    map[string][]model.AgentSession
 	repos       map[string][]ext_store.RepoLink
-	written     map[string]model.Summary
+	updated     map[string]*model.Idea
 	addResource func(slug string, res model.Resource) error // optional override
 	addedRes    []addedResource
 }
@@ -35,7 +35,7 @@ func newFakeStore() *fakeStore {
 		ideas:    map[string]*model.Idea{},
 		sessions: map[string][]model.AgentSession{},
 		repos:    map[string][]ext_store.RepoLink{},
-		written:  map[string]model.Summary{},
+		updated:  map[string]*model.Idea{},
 	}
 }
 
@@ -71,27 +71,28 @@ func (f *fakeStore) ListRepos(_ context.Context, slug string) ([]ext_store.RepoL
 	return f.repos[slug], nil
 }
 
-func (f *fakeStore) WriteSummary(_ context.Context, slug string, sum model.Summary) error {
+func (f *fakeStore) Update(_ context.Context, idea *model.Idea) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.written[slug] = sum
+	cp := *idea
+	f.updated[idea.Slug] = &cp
 	return nil
 }
 
-func (f *fakeStore) waitForWrite(t *testing.T, slug string) model.Summary {
+func (f *fakeStore) waitForUpdate(t *testing.T, slug string) *model.Idea {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		f.mu.Lock()
-		sum, ok := f.written[slug]
+		idea, ok := f.updated[slug]
 		f.mu.Unlock()
 		if ok {
-			return sum
+			return idea
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("summary never written for %q", slug)
-	return model.Summary{}
+	t.Fatalf("idea never updated for %q", slug)
+	return nil
 }
 
 // fakeGenerator is a test-only Generator implementing the
@@ -132,9 +133,9 @@ func TestSummarizer_RegeneratesAndWritesSidecar(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
 	store.ideas["foo"] = &model.Idea{
-		Slug:    "foo",
-		Name:    "Foo",
-		Summary: "Original body text",
+		Slug: "foo",
+		Name: "Foo",
+		Body: "Original body text",
 	}
 	ended := time.Now().Add(-time.Hour)
 	store.sessions["foo"] = []model.AgentSession{{
@@ -152,19 +153,13 @@ func TestSummarizer_RegeneratesAndWritesSidecar(t *testing.T) {
 	if ok := s.Enqueue("foo"); !ok {
 		t.Fatal("Enqueue returned false")
 	}
-	sum := store.waitForWrite(t, "foo")
+	idea := store.waitForUpdate(t, "foo")
 
-	if sum.Line == "" {
-		t.Errorf("line is empty")
+	if idea.Description == "" {
+		t.Errorf("description is empty")
 	}
-	if sum.SourceSessionUUID != "11111111-1111-1111-1111-111111111111" {
-		t.Errorf("source uuid = %q", sum.SourceSessionUUID)
-	}
-	if sum.SourceSessionEndedAt == nil {
-		t.Errorf("source ended_at not set")
-	}
-	if sum.GeneratedAt.IsZero() {
-		t.Errorf("generated_at is zero")
+	if in := gen.lastInput(); in.SessionUUID != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("generator source uuid = %q", in.SessionUUID)
 	}
 }
 
@@ -177,10 +172,10 @@ func TestRegenerate_PassesAllPointersToGenerator(t *testing.T) {
 	store := newFakeStore()
 	ideasDir := "/ideas"
 	store.ideas["repo-idea"] = &model.Idea{
-		Slug:    "repo-idea",
-		Name:    "Repo Idea",
-		Status:  model.StatusActive,
-		Summary: "Body.",
+		Slug:   "repo-idea",
+		Name:   "Repo Idea",
+		Status: model.StatusActive,
+		Body:   "Body.",
 	}
 	store.repos["repo-idea"] = []ext_store.RepoLink{
 		{Name: "api", Path: "repos/api"},
@@ -199,7 +194,7 @@ func TestRegenerate_PassesAllPointersToGenerator(t *testing.T) {
 	s.Start(context.Background(), 1)
 	defer s.Stop()
 	s.Enqueue("repo-idea")
-	store.waitForWrite(t, "repo-idea")
+	store.waitForUpdate(t, "repo-idea")
 
 	in := gen.lastInput()
 	if in.Status != "active" {
@@ -239,9 +234,9 @@ func TestSummarizer_SkipsRunningSessions(t *testing.T) {
 	defer s.Stop()
 	s.Enqueue("foo")
 
-	sum := store.waitForWrite(t, "foo")
-	if sum.SourceSessionUUID != "" {
-		t.Errorf("running session leaked into source: %q", sum.SourceSessionUUID)
+	store.waitForUpdate(t, "foo")
+	if in := gen.lastInput(); in.SessionUUID != "" {
+		t.Errorf("running session leaked into source: %q", in.SessionUUID)
 	}
 }
 
@@ -262,9 +257,9 @@ func TestSummarizer_PicksMostRecentlyEnded(t *testing.T) {
 	defer s.Stop()
 	s.Enqueue("foo")
 
-	sum := store.waitForWrite(t, "foo")
-	if sum.SourceSessionUUID != "newer" {
-		t.Errorf("picked %q, want newer", sum.SourceSessionUUID)
+	store.waitForUpdate(t, "foo")
+	if in := gen.lastInput(); in.SessionUUID != "newer" {
+		t.Errorf("picked %q, want newer", in.SessionUUID)
 	}
 }
 
@@ -282,7 +277,7 @@ func TestSummarizer_CoalescesDuplicates(t *testing.T) {
 	s.Enqueue("foo")
 	s.Enqueue("foo")
 	s.Enqueue("foo")
-	store.waitForWrite(t, "foo")
+	store.waitForUpdate(t, "foo")
 
 	// Give any leaked duplicate runs a moment to surface.
 	time.Sleep(50 * time.Millisecond)
@@ -306,10 +301,10 @@ func TestSummarizer_DropsEmptyOutput(t *testing.T) {
 
 	time.Sleep(150 * time.Millisecond)
 	store.mu.Lock()
-	_, written := store.written["foo"]
+	_, written := store.updated["foo"]
 	store.mu.Unlock()
 	if written {
-		t.Errorf("expected no summary written when generator returns ErrEmpty")
+		t.Errorf("expected no idea update when generator returns ErrEmpty")
 	}
 }
 
@@ -426,7 +421,7 @@ func TestSummarizer_TranscriptTailFedToGenerator(t *testing.T) {
 	s.Start(context.Background(), 1)
 	defer s.Stop()
 	s.Enqueue("foo")
-	store.waitForWrite(t, "foo")
+	store.waitForUpdate(t, "foo")
 
 	in := gen.lastInput()
 	if in.IdeaName != "Foo" {
@@ -482,7 +477,7 @@ func TestRegenerate_AppliesSuggestedResources(t *testing.T) {
 	if ok := s.Enqueue("bar"); !ok {
 		t.Fatal("Enqueue returned false")
 	}
-	_ = store.waitForWrite(t, "bar")
+	_ = store.waitForUpdate(t, "bar")
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -522,7 +517,7 @@ func TestRegenerate_NoSuggestedResources_NoCalls(t *testing.T) {
 	if ok := s.Enqueue("empty"); !ok {
 		t.Fatal("Enqueue returned false")
 	}
-	_ = store.waitForWrite(t, "empty")
+	_ = store.waitForUpdate(t, "empty")
 
 	store.mu.Lock()
 	defer store.mu.Unlock()

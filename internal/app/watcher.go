@@ -325,10 +325,10 @@ func (iw *ideaWatcher) matchWorktree(eventPath string) (worktreeKey, bool) {
 // atomicfile.Write uses a `.tmp-*` prefix; vim/.swp and .DS_Store also
 // caught by the dot-prefix rule.
 //
-// summary.json is ignored too: the summarizer writes it, and an
-// idea:changed emit on its own write would re-trigger the
-// summarizer (Phase 3C). The summarizer doesn't need a watcher
-// event to know about its own writes.
+// summary.json is ignored too: it's the retired summarizer sidecar
+// (the one-liner now lives on idea.md's description). Legacy files may
+// still sit on disk until migration folds them in; ignoring them keeps
+// a stale sidecar from emitting idea:changed.
 func shouldIgnore(filename string) bool {
 	if filename == "" || filename[0] == '.' {
 		return true
