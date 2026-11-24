@@ -10,7 +10,7 @@ require (
 	github.com/go-git/go-billy/v6 v6.0.0-alpha.1
 	github.com/go-git/go-git/v6 v6.0.0-alpha.4
 	github.com/google/uuid v1.6.0
-	github.com/mark3labs/mcp-go v0.55.1
+	github.com/mark3labs/mcp-go v1.6.0
 	github.com/paultyng/go-okf v0.1.0-beta.3
 	github.com/spf13/cobra v1.10.2
 	github.com/wailsapp/wails/v2 v2.17.1
