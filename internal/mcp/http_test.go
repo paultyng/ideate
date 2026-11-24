@@ -216,8 +216,8 @@ func TestHTTPUpdateIdea(t *testing.T) {
 	}
 
 	idea := store.ideas["test-idea"]
-	if idea.Summary != "New summary" {
-		t.Errorf("summary = %q", idea.Summary)
+	if idea.Body != "New summary" {
+		t.Errorf("summary = %q", idea.Body)
 	}
 }
 
@@ -766,9 +766,7 @@ func TestHTTPListIdeasInlinesState(t *testing.T) {
 	// summary field round-trips.
 	now := time.Now().UTC()
 	store.ideas["test-idea"].Updated = now
-	store.summaries = map[string]*model.Summary{
-		"test-idea": {Line: "Test the inlined state shape."},
-	}
+	store.ideas["test-idea"].Description = "Test the inlined state shape."
 	store.backlog = map[string][]model.BacklogItem{
 		"test-idea": {
 			{ID: "bl-1", Title: "first open task", Status: model.BacklogStatusOpen},

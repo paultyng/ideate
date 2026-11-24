@@ -92,6 +92,8 @@ export async function readSessionReplay(page: Page, uuid: string): Promise<strin
 // contaminates capturePty's combined stream when tests read without
 // a sessionId.
 export async function stopAllRunningSessions(page: Page): Promise<void> {
+  // A crashed/closed page would throw here and mask the test's real failure.
+  if (page.isClosed()) return
   await page.evaluate(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const W = window as any
@@ -128,18 +130,16 @@ export async function stopAllRunningSessions(page: Page): Promise<void> {
 // getMountedSessionId returns one mounted TerminalPanel's session id —
 // the last one in insertion order — for tests that started a session
 // via the form flow (no binding return value handing back the uuid).
-// Throws if no terminal has mounted yet; pair with `waitForSelector`
-// on `.xterm-screen` first.
-export async function getMountedSessionId(page: Page): Promise<string> {
-  const id = await page.evaluate(() => {
+// Waits for the registry entry: `.xterm-screen` can appear before
+// TerminalPanel's effect registers the id.
+export async function getMountedSessionId(page: Page, timeoutMs = 5_000): Promise<string> {
+  const handle = await page.waitForFunction(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
-    if (!reg) return ''
-    const keys = Object.keys(reg)
-    return keys.length ? keys[keys.length - 1] : ''
-  })
-  if (!id) throw new Error('getMountedSessionId: no terminal mounted yet')
-  return id
+    const keys = reg ? Object.keys(reg) : []
+    return keys.length ? keys[keys.length - 1] : false
+  }, undefined, { timeout: timeoutMs })
+  return (await handle.jsonValue()) as string
 }
 
 // waitForTerminalMount blocks until TerminalPanel has registered the
@@ -163,6 +163,14 @@ export async function waitForTerminalMount(
     { timeout: timeoutMs },
   )
 }
+
+// AGENT_LIFECYCLE_TIMEOUT_MS is the shared budget for any wait that blocks
+// on the testagent reaching a lifecycle state — boot/MCP-connect readiness or
+// teardown/exit. On loaded CI runners the testagent boot → MCP `Connect()`
+// handshake routinely exceeds 10s (ac3607a bumped dashboard's wait 5s→15s for
+// exactly this). Kept as one exported constant so per-spec literals can't
+// drift back below the proven value; that duplication was the flake's root.
+export const AGENT_LIFECYCLE_TIMEOUT_MS = 15_000
 
 // waitForAgentReady blocks until the upstream testagent has finished
 // booting (MCP connected + SessionStart fired) for `sessionId`. The
@@ -196,7 +204,7 @@ export async function waitForTerminalMount(
 export async function waitForAgentReady(
   page: Page,
   sessionId: string,
-  timeoutMs = 15_000,
+  timeoutMs = AGENT_LIFECYCLE_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {

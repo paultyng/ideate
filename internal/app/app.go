@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -60,6 +62,7 @@ type App struct {
 	store          *store.FSStore
 	svc            *service.IdeaService
 	mcpManager     *ideateMCP.Manager
+	resuming       sync.Map // uuid -> struct{}; per-uuid resume guard
 	hooksHandler   claudecode.HookHandler
 	events         *pubsub.Broker[pubsub.Event]
 	eventBridge    chan struct{} // closed by startEventBridge to signal exit
@@ -120,6 +123,7 @@ func New(config LaunchConfig) *App {
 	cfg, _ := store.LoadConfig(ideasDir)
 	st := store.NewFSStore(ideasDir, ideatecfg.ReviewsDir(configDir), cfg.BranchPrefix, cfg.TrackingBranch)
 	st.SetSummaryBackend(cfg.Summary.Backend)
+	runOKFMigration(st)
 
 	a := &App{
 		coordinator:   coord,
@@ -169,29 +173,57 @@ func New(config LaunchConfig) *App {
 	return a
 }
 
+// runOKFMigration converts legacy idea.md files once, before anything else
+// reads or watches the ideas dir. Failure never blocks startup: dual-read
+// keeps unconverted ideas readable.
+func runOKFMigration(st *store.FSStore) {
+	start := time.Now()
+	report, err := st.MigrateToOKF(context.Background())
+	if err != nil {
+		slog.Error("store: okf migration", slog.Any("err", err))
+		return
+	}
+	for slug, ferr := range report.Failed {
+		slog.Warn("store: okf migration skipped idea", slog.String("slug", slug), slog.Any("err", ferr))
+	}
+	if report.BackupDir == "" && report.Migrated == 0 && len(report.Failed) == 0 {
+		return
+	}
+	slog.Info("store: okf migration",
+		slog.String("backup", report.BackupDir),
+		slog.Int("migrated", report.Migrated),
+		slog.Int("folded", report.Folded),
+		slog.Int("failed", len(report.Failed)),
+		slog.Int64("ms", time.Since(start).Milliseconds()))
+}
+
 // newIdeaGetter builds the IdeaGetter callback registered with the
-// Claude runner. AddDirs include the idea root plus every linked
-// repo's absolute path so Claude's per-dir skill discovery picks up
-// `.claude/skills/` directories committed inside each repo. A failure
-// to list repos must not block session start — log + fall back to
-// `[ideaDir]` only.
+// Claude runner. AddDirs include the idea root plus every directory
+// under `<idea>/repos` so Claude's per-dir skill discovery picks up
+// `.claude/skills/` directories committed inside each repo. Repos are
+// enumerated with a plain directory read (no git) so session spawn
+// stays fast. A failure to read the dir must not block session start;
+// log + fall back to `[ideaDir]` only.
 func newIdeaGetter(st store.Store, ideasDir string) func(slug string) (*agent.IdeaContext, error) {
 	return func(slug string) (*agent.IdeaContext, error) {
-		ctx := context.Background()
-		idea, err := st.Get(ctx, slug)
+		idea, err := st.Get(context.Background(), slug)
 		if err != nil {
 			return nil, err
 		}
 		ideaDir := filepath.Join(ideasDir, slug)
 		addDirs := []string{ideaDir}
-		repos, err := st.ListRepos(ctx, slug)
-		if err != nil {
+		entries, err := os.ReadDir(filepath.Join(ideaDir, "repos"))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+		case err != nil:
 			slog.Warn("idea getter: listing repos failed; falling back to idea-root only",
 				slog.String("slug", slug),
 				slog.Any("err", err))
-		} else {
-			for _, r := range repos {
-				addDirs = append(addDirs, filepath.Join(ideaDir, r.Path))
+		default:
+			for _, e := range entries {
+				if e.IsDir() {
+					addDirs = append(addDirs, filepath.Join(ideaDir, "repos", e.Name()))
+				}
 			}
 		}
 		return &agent.IdeaContext{
