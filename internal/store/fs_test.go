@@ -26,9 +26,9 @@ func TestCreateAndGet(t *testing.T) {
 	s, dir := newTestStore(t)
 
 	idea := &model.Idea{
-		Name:    "Batch Processing",
-		Status:  model.StatusPaused,
-		Summary: "An idea about batch processing.\n",
+		Name:   "Batch Processing",
+		Status: model.StatusPaused,
+		Body:   "An idea about batch processing.\n",
 	}
 
 	if err := s.Create(ctx, idea); err != nil {
@@ -67,8 +67,8 @@ func TestCreateAndGet(t *testing.T) {
 	if got.Status != model.StatusPaused {
 		t.Errorf("Status = %q, want %q", got.Status, model.StatusPaused)
 	}
-	if got.Summary != "An idea about batch processing.\n" {
-		t.Errorf("Summary = %q, want %q", got.Summary, "An idea about batch processing.\n")
+	if got.Body != "An idea about batch processing.\n" {
+		t.Errorf("Body = %q, want %q", got.Body, "An idea about batch processing.\n")
 	}
 	if got.Created.IsZero() {
 		t.Error("Created is zero")
@@ -180,7 +180,7 @@ func TestUpdate(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newTestStore(t)
 
-	idea := &model.Idea{Name: "Updatable", Status: model.StatusPaused, Summary: "Original body.\n"}
+	idea := &model.Idea{Name: "Updatable", Status: model.StatusPaused, Body: "Original body.\n"}
 	if err := s.Create(ctx, idea); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -198,8 +198,8 @@ func TestUpdate(t *testing.T) {
 		t.Errorf("Status = %q, want %q", got.Status, model.StatusActive)
 	}
 	// Body preserved.
-	if got.Summary != "Original body.\n" {
-		t.Errorf("Summary = %q, want %q", got.Summary, "Original body.\n")
+	if got.Body != "Original body.\n" {
+		t.Errorf("Body = %q, want %q", got.Body, "Original body.\n")
 	}
 	if got.Updated.IsZero() {
 		t.Error("Updated is zero after update")
@@ -854,7 +854,7 @@ func TestTouchIdea(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newTestStore(t)
 
-	idea := &model.Idea{Name: "Touchable", Status: model.StatusActive, Summary: "Body.\n"}
+	idea := &model.Idea{Name: "Touchable", Status: model.StatusActive, Body: "Body.\n"}
 	if err := s.Create(ctx, idea); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -882,8 +882,8 @@ func TestTouchIdea(t *testing.T) {
 	if !after.Updated.After(before.Updated) {
 		t.Errorf("persisted Updated %v not after original %v", after.Updated, before.Updated)
 	}
-	if after.Summary != before.Summary {
-		t.Errorf("Summary changed: %q -> %q", before.Summary, after.Summary)
+	if after.Body != before.Body {
+		t.Errorf("Body changed: %q -> %q", before.Body, after.Body)
 	}
 	if after.Status != before.Status {
 		t.Errorf("Status changed: %q -> %q", before.Status, after.Status)

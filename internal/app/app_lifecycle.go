@@ -239,8 +239,8 @@ func (a *App) Startup(ctx context.Context) {
 	//     externally or that ran via claudesync) and so never had their
 	//     summary generated.
 	//   - Ideas whose summary lags because Ideate was offline during
-	//     the SessionEnd hook, or whose body got edited externally
-	//     (idea.Updated > summary.generated_at).
+	//     the SessionEnd hook (latest ended session is newer than
+	//     idea.Generated, the last content-change time — see NeedsRegeneration).
 	// Sweep runs every 3 hours while the app is up; cheap on the
 	// up-to-date case (one summary read + session list per idea, no
 	// runner spawn). Subprocess fan-out is bounded by the summarizer
@@ -544,20 +544,19 @@ type BusySession struct {
 // hook (Prompt/Tool/Stop/Notification) funnels through TouchIdea, so this
 // field doubles as a "last activity" signal for the bar's recency sort.
 //
-// IdeaSummary is the parent idea's summary sidecar (one-sentence intent
-// line) when present. Embedded inline so the bar's overflow popover can
-// render dashboard-style cards without a second fan-out fetch per
-// session.
+// IdeaSummary is the parent idea's one-line description (idea.Description)
+// when present. Embedded inline so the bar's overflow popover can render
+// dashboard-style cards without a second fan-out fetch per session.
 type ActiveSession struct {
-	Slug        string         `json:"slug"`
-	IdeaName    string         `json:"ideaName"`
-	IdeaStatus  string         `json:"ideaStatus"` // active|paused|archived; empty for orchestrator
-	UUID        string         `json:"uuid"`
-	AgentType   string         `json:"agentType"`
-	Activity    string         `json:"activity"`
-	Started     string         `json:"started"` // RFC3339; sortable as a string
-	Updated     string         `json:"updated"` // RFC3339; parent idea's Updated (== last session-activity bump)
-	IdeaSummary *model.Summary `json:"ideaSummary,omitempty"`
+	Slug        string `json:"slug"`
+	IdeaName    string `json:"ideaName"`
+	IdeaStatus  string `json:"ideaStatus"` // active|paused|archived; empty for orchestrator
+	UUID        string `json:"uuid"`
+	AgentType   string `json:"agentType"`
+	Activity    string `json:"activity"`
+	Started     string `json:"started"` // RFC3339; sortable as a string
+	Updated     string `json:"updated"` // RFC3339; parent idea's Updated (== last session-activity bump)
+	IdeaSummary string `json:"ideaSummary,omitempty"`
 }
 
 // ListActiveSessions returns every running or dormant idea-bound session.

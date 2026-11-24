@@ -50,7 +50,7 @@ function truncateSummary(raw: string | undefined): string {
 // user originally wrote. Falls back to the truncated body until the
 // summarizer has run.
 function pickSummaryLine(summary: store.IdeaSessionSummary | undefined, body: string | undefined): string {
-  const line = summary?.ideaSummary?.line?.trim()
+  const line = summary?.ideaSummary?.trim()
   if (line) return line
   return truncateSummary(body)
 }
