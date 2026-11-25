@@ -30,13 +30,13 @@ jobs:
 
       - name: Install tools
         run: |
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
           go install github.com/bufbuild/buf/cmd/buf@v1.70.0
-          go install github.com/go-task/task/v3/cmd/task@v3.51.1
+          go install github.com/go-task/task/v3/cmd/task@v3.54.0
           brew install create-dmg
 
       - name: Import signing certificate
-        uses: apple-actions/import-codesign-certs@63fff01cd422d4b7b855d40ca1e9d34d2de9427d # v3
+        uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c # v7.2.0
         with:
           p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
           p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
