@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { stopAllRunningSessions } from './ptyCapture'
+import { getMountedSessionId, stopAllRunningSessions } from './ptyCapture'
 
 const ideasDir = process.env.TEST_IDEAS_DIR || ''
 
@@ -134,10 +134,12 @@ test.describe('Command palette', () => {
     await page.goto('/')
     await openPalette(page)
 
-    const names = await page.locator('.command-palette-list .session-card-name')
-      .allInnerTexts()
-    const filtered = names.filter((n) => n === aName || n === bName)
-    expect(filtered).toEqual([bName, aName])
+    // The list loads after the palette opens; poll instead of reading once.
+    await expect.poll(async () => {
+      const names = await page.locator('.command-palette-list .session-card-name')
+        .allInnerTexts()
+      return names.filter((n) => n === aName || n === bName)
+    }).toEqual([bName, aName])
   })
 
   // Empty-query view always pins the orchestrator entry first,
@@ -287,14 +289,8 @@ test.describe('Command palette', () => {
     await page.selectOption('.session-start select', 'testagent')
     await page.click('button:has-text("Start Session")')
     await page.waitForSelector('.terminal-container .xterm-screen', { timeout: 10000 })
-    const uuid = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
-      if (!reg) return ''
-      const keys = Object.keys(reg)
-      return keys[keys.length - 1] || ''
-    })
-    expect(uuid).not.toBe('')
+    // The panel can remount on /session/new, briefly emptying the registry.
+    const uuid = await getMountedSessionId(page, 10_000)
 
     // Stop the live session; the coordinator flips the on-disk record
     // to status="stopped" once the PTY exits. Poll until that lands.
