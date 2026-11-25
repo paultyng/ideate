@@ -77,6 +77,32 @@ test.describe('Dormant resume on navigation', () => {
     await stopAllRunningSessions(page)
   })
 
+  test('home card click waits for session summaries before navigating', async ({ page }) => {
+    test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
+
+    const name = `Slow Summaries ${Date.now()}`
+    const slug = await createIdea(page, name)
+    const uuid = await createDormantSession(page, slug)
+
+    // Delay the summaries binding so ListIdeas resolves first. In-app nav
+    // (no reload) keeps the wrapper installed.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app = (window as any).go.app.App
+      const orig = app.ListSessionSummaries
+      app.ListSessionSummaries = async () => {
+        await new Promise((r) => setTimeout(r, 2000))
+        return orig()
+      }
+    })
+    await page.click('button[aria-label="Home"]')
+    const card = page.locator('.idea-card', { hasText: name })
+    await expect(card).toBeVisible({ timeout: 10000 })
+    await card.click()
+
+    await expect(page).toHaveURL(new RegExp(`#/idea/${slug}/session/${uuid}$`), { timeout: 15000 })
+  })
+
   test('home card click auto-resumes dormant session', async ({ page }) => {
     test.skip(!ideasDir, 'TEST_IDEAS_DIR not set')
 
