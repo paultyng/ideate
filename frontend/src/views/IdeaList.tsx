@@ -22,13 +22,11 @@ export default function IdeaList() {
   const [showArchived, setShowArchived] = useState(false)
 
   useEffect(() => {
-    const refreshIdeas = () => {
+    const refreshIdeas = () =>
       ListIdeas()
         .then((list) => setIdeas(list || []))
         .catch(() => setIdeas([]))
-        .finally(() => setLoading(false))
-    }
-    const refreshSummaries = () => {
+    const refreshSummaries = () =>
       ListSessionSummaries()
         .then((list) => {
           const map: Record<string, store.IdeaSessionSummary> = {}
@@ -36,9 +34,8 @@ export default function IdeaList() {
           setSessionSummaries(map)
         })
         .catch(() => setSessionSummaries({}))
-    }
-    refreshIdeas()
-    refreshSummaries()
+    // Cards route clicks from summaries; don't render them before both load.
+    Promise.all([refreshIdeas(), refreshSummaries()]).finally(() => setLoading(false))
 
     // idea:changed (subscribed below) drives most refreshes. Keep a
     // coarse backstop in case the watcher misses an event.
