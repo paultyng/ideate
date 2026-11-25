@@ -30,9 +30,9 @@ jobs:
 
       - name: Install tools
         run: |
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
           go install github.com/bufbuild/buf/cmd/buf@v1.70.0
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 
       - name: Install frontend deps
         run: cd frontend && npm ci
@@ -84,9 +84,9 @@ jobs:
 
       - name: Install tools
         run: |
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
           go install github.com/bufbuild/buf/cmd/buf@v1.70.0
-          go install github.com/go-task/task/v3/cmd/task@v3.51.1
+          go install github.com/go-task/task/v3/cmd/task@v3.54.0
 
       - name: Install frontend deps
         run: cd frontend && npm ci

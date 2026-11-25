@@ -1,6 +1,6 @@
 module github.com/paultyng/ideate
 
-go 1.26.4
+go 1.27.4
 
 require (
 	connectrpc.com/connect v1.21.1
