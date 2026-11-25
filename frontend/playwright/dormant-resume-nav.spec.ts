@@ -38,14 +38,8 @@ async function createDormantSession(page: import('@playwright/test').Page, slug:
   await page.click('button:has-text("Start Session")')
   await page.waitForSelector('.terminal-container .xterm-screen', { timeout: 10000 })
 
-  const uuid = await page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
-    if (!reg) return ''
-    const keys = Object.keys(reg)
-    return keys[keys.length - 1] || ''
-  })
-  expect(uuid).not.toBe('')
+  // The panel can remount on /session/new, briefly emptying the registry.
+  const uuid = await getMountedSessionId(page, 10_000)
 
   await page.evaluate(async (id) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
