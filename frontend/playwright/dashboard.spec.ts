@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { stopAllRunningSessions } from './ptyCapture'
+import { callBinding, emitEvent, evalTerminals, waitForTerminals } from './backend'
 
 const ideasDir = process.env.TEST_IDEAS_DIR || ''
 
@@ -71,13 +72,7 @@ test.describe('Dashboard', () => {
     const name = `Description Summary Test ${Date.now()}`
     const body = 'Original body that should NOT appear on the card once the description is in place.'
     await page.goto('/')
-    const slug = await page.evaluate(
-      async ({ n, b }) => {
-        // @ts-expect-error wails binding
-        return (await window.go.app.App.CreateIdea(n, 'active', b)) as string
-      },
-      { n: name, b: body },
-    )
+    const slug = await callBinding<string>(page, 'CreateIdea', name, 'active', body)
 
     const summaryLine = 'Headless-generated summary that should appear on the card.'
     // Inject the OKF `description` key into the frontmatter CreateIdea
@@ -105,10 +100,7 @@ test.describe('Dashboard', () => {
     // CreateIdea binding lets us seed the idea with status='active'
     // without going through the form, keeping the test under a second.
     await page.goto('/')
-    await page.evaluate(async (n) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.CreateIdea(n, 'active', '')
-    }, name)
+    await callBinding(page, 'CreateIdea', name, 'active', '')
 
     const card = page.locator('.idea-card', { hasText: name })
     await expect(card).toBeVisible({ timeout: 5000 })
@@ -122,16 +114,9 @@ test.describe('Dashboard', () => {
     const name = `Bar Chip Icon Test ${Date.now()}`
     await page.goto('/')
 
-    const result = await page.evaluate(async (n) => {
-      // @ts-expect-error wails binding
-      const slug = (await window.go.app.App.CreateIdea(n, 'active', '')) as string
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartIdeaSession(slug, 'testagent', false)) as {
-
-        uuid: string
-      }
-      return { slug, uuid: r.uuid }
-    }, name)
+    const slug = await callBinding<string>(page, 'CreateIdea', name, 'active', '')
+    const r = await callBinding<{ uuid: string }>(page, 'StartIdeaSession', slug, 'testagent', false)
+    const result = { slug, uuid: r.uuid }
 
     // Hash-nav (not page.goto) so the bar's render state survives.
     await page.evaluate((url) => {
@@ -185,10 +170,7 @@ test.describe('Dashboard', () => {
     await page.goto('/')
 
     const name = `Repo List Test ${Date.now()}`
-    const slug = await page.evaluate(async (n) => {
-      // @ts-expect-error wails binding
-      return (await window.go.app.App.CreateIdea(n, 'active', '')) as string
-    }, name)
+    const slug = await callBinding<string>(page, 'CreateIdea', name, 'active', '')
 
     // Drop two repo dirs directly on disk — LinkRepo is heavyweight
     // and we only need the directory presence to drive the card.
@@ -251,10 +233,7 @@ test.describe('Dashboard', () => {
   test('orchestrator does not appear in the global session bar', async ({ page }) => {
     await page.goto('/')
 
-    await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartRootSession('testagent')
-    })
+    await callBinding(page, 'StartRootSession', 'testagent')
 
     // Give the bar a beat to refresh, then sample its order — Orchestrator
     // must be absent from both visible chips and the overflow popover.
@@ -275,10 +254,7 @@ test.describe('Dashboard', () => {
   test('topbar Notebook button toggles the orchestrator drawer with a populated terminal', async ({ page }) => {
     await page.goto('/#/idea/new')
 
-    await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartRootSession('testagent')
-    })
+    await callBinding(page, 'StartRootSession', 'testagent')
 
     // Drawer starts closed (no localStorage state from a fresh context).
     await expect(page.locator('[data-testid="orchestrator-drawer"]')).toHaveCount(0)
@@ -292,9 +268,7 @@ test.describe('Dashboard', () => {
     // Terminal mounts and replay populates the buffer with testagent's banner.
     await page.waitForSelector('.orchestrator-host .terminal-container', { timeout: 10000 })
     await waitForBanner(page)
-    const text = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals
+    const text = await evalTerminals(page, (reg) => {
       if (!reg) return ''
       const term = Object.values(reg)[0] as
         | { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }
@@ -343,19 +317,13 @@ test.describe('Dashboard', () => {
       timeout: 5000,
     })
 
-    await page.evaluate(() => {
-      // @ts-expect-error wails runtime
-      window.runtime.EventsEmit('orchestrator:navigate', { path: '/idea/new' })
-    })
+    await emitEvent(page, 'orchestrator:navigate', { path: '/idea/new' })
     await expect(page.locator('h1')).toHaveText('New Idea')
     // Without an explicit user-toggle off-home, leaving / closes the drawer.
     await expect(page.locator('[data-testid="orchestrator-drawer"]')).toHaveCount(0)
 
     // goto_dashboard equivalent — re-pins on return.
-    await page.evaluate(() => {
-      // @ts-expect-error wails runtime
-      window.runtime.EventsEmit('orchestrator:navigate', { path: '/' })
-    })
+    await emitEvent(page, 'orchestrator:navigate', { path: '/' })
     await expect(page.locator('.dashboard')).toBeVisible()
     await expect(page.locator('[data-testid="orchestrator-drawer"]')).toBeVisible()
   })
@@ -401,20 +369,14 @@ test.describe('Dashboard', () => {
     const name = `Rename Redirect ${Date.now()}`
     await page.goto('/')
 
-    const slug = await page.evaluate(async (n) => {
-      // @ts-expect-error wails binding
-      return (await window.go.app.App.CreateIdea(n, 'active', '')) as string
-    }, name)
+    const slug = await callBinding<string>(page, 'CreateIdea', name, 'active', '')
 
     await page.evaluate((s) => {
       window.location.hash = `/idea/${s}`
     }, slug)
     await expect(page.locator('.idea-detail-name')).toHaveText(name)
 
-    await page.evaluate((payload) => {
-      // @ts-expect-error wails runtime
-      window.runtime.EventsEmit('idea:renamed', payload)
-    }, { old_slug: slug, new_slug: 'renamed-via-event' })
+    await emitEvent(page, 'idea:renamed', { old_slug: slug, new_slug: 'renamed-via-event' })
 
     await expect.poll(() => page.url().split('#')[1] || '').toBe('/idea/renamed-via-event')
   })
@@ -452,10 +414,7 @@ test.describe('Dashboard', () => {
     // / would prevent the close + reopen step the test depends on).
     await page.goto('/#/idea/new')
 
-    await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartRootSession('testagent')
-    })
+    await callBinding(page, 'StartRootSession', 'testagent')
 
     // Open drawer — first mount attaches via replay (root session is
     // already running) so the buffer arrives populated.
@@ -487,10 +446,7 @@ test.describe('Dashboard', () => {
     // the sibling drawer test's setup).
     await page.goto('/#/idea/new')
 
-    await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartRootSession('testagent')
-    })
+    await callBinding(page, 'StartRootSession', 'testagent')
 
     // Open drawer at default height.
     await page.click('button[aria-label="Orchestrator"]')
@@ -578,30 +534,16 @@ test.describe('Dashboard', () => {
     await page.goto('/')
 
     const xName = `BarOrder X ${Date.now()}`
-    const xResult = await page.evaluate(async (name) => {
-      // @ts-expect-error wails binding
-      const slug = (await window.go.app.App.CreateIdea(name, 'active', '')) as string
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartIdeaSession(slug, 'testagent', false)) as {
-
-        uuid: string
-      }
-      return { slug, uuid: r.uuid }
-    }, xName)
+    const xResultSlug = await callBinding<string>(page, 'CreateIdea', xName, 'active', '')
+    const xResultSession = await callBinding<{ uuid: string }>(page, 'StartIdeaSession', xResultSlug, 'testagent', false)
+    const xResult = { slug: xResultSlug, uuid: xResultSession.uuid }
 
     // Y started AFTER X — newer `started` timestamp. Without the
     // lastFocused boost, the dashboard bar would put Y ahead of X.
     const yName = `BarOrder Y ${Date.now()}`
-    const yResult = await page.evaluate(async (name) => {
-      // @ts-expect-error wails binding
-      const slug = (await window.go.app.App.CreateIdea(name, 'active', '')) as string
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartIdeaSession(slug, 'testagent', false)) as {
-
-        uuid: string
-      }
-      return { slug, uuid: r.uuid }
-    }, yName)
+    const yResultSlug = await callBinding<string>(page, 'CreateIdea', yName, 'active', '')
+    const yResultSession = await callBinding<{ uuid: string }>(page, 'StartIdeaSession', yResultSlug, 'testagent', false)
+    const yResult = { slug: yResultSlug, uuid: yResultSession.uuid }
 
     // Visit X — bumps X's lastFocused. Wait for the bar to mark X as
     // the .current chip, which is committed in the same render cycle
@@ -649,12 +591,8 @@ test.describe('Dashboard', () => {
     for (let i = 0; i < 3; i++) {
       const name = `Overflow ${i} ${Date.now()}`
       names.push(name)
-      await page.evaluate(async (n) => {
-        // @ts-expect-error wails binding
-        const slug = (await window.go.app.App.CreateIdea(n, 'active', '')) as string
-        // @ts-expect-error wails binding
-        await window.go.app.App.StartIdeaSession(slug, 'testagent', false)
-      }, name)
+      const slug = await callBinding<string>(page, 'CreateIdea', name, 'active', '')
+      await callBinding(page, 'StartIdeaSession', slug, 'testagent', false)
     }
 
     const overflowBtn = page.locator('.global-session-more')
@@ -678,13 +616,8 @@ test.describe('Dashboard', () => {
 
     await page.goto('/')
 
-    const slug = await page.evaluate(async (n) => {
-      // @ts-expect-error wails binding
-      const s = (await window.go.app.App.CreateIdea(n, 'active', '')) as string
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartIdeaSession(s, 'testagent', false)
-      return s
-    }, `Glow ${Date.now()}`)
+    const slug = await callBinding<string>(page, 'CreateIdea', `Glow ${Date.now()}`, 'active', '')
+    await callBinding(page, 'StartIdeaSession', slug, 'testagent', false)
     await patchSessionActivity(slug, 'waiting')
 
     const overflowEl = page.locator('.global-session-overflow')
@@ -705,10 +638,10 @@ test.describe('Dashboard', () => {
 // in 1-2s) and gives slow CI the headroom it needs.
 async function waitForBanner(page: import('@playwright/test').Page) {
   try {
-    await page.waitForFunction(
-      () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const reg = (window as any).__ideateTerminals as
+    await waitForTerminals(
+      page,
+      (regAny) => {
+        const reg = regAny as
           | Record<
               string,
               {
@@ -751,12 +684,11 @@ async function waitForBanner(page: import('@playwright/test').Page) {
     // would shadow the real timeout error in the failure log.
     let dump: string
     try {
-      dump = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as
+      dump = await evalTerminals(page, (regAny) => {
+      const reg = regAny as
         | Record<string, { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }>
         | undefined
-      if (!reg) return '(no __ideateTerminals registered)'
+      if (!reg) return '(no terminal registry)'
       const ids = Object.keys(reg)
       if (ids.length === 0) return '(0 terminals registered)'
       return ids.map((id) => {
@@ -789,9 +721,8 @@ async function assertBannerAtCol0(
   page: import('@playwright/test').Page,
   context: string,
 ) {
-  const closingLine = await page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reg = (window as any).__ideateTerminals as
+  const closingLine = await evalTerminals(page, (regAny) => {
+    const reg = regAny as
       | Record<
           string,
           {

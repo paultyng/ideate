@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { stopAllRunningSessions, waitForAgentReady } from './ptyCapture'
+import { callBinding, evalTerminals, waitForTerminals } from './backend'
 
 // Screenshot specs run as part of `task test:ui` (assertions exercise
 // the views every run) and as `task screenshots` (sets SAVE_SCREENSHOTS=1
@@ -157,21 +158,16 @@ test.describe('Screenshots', () => {
     // doesn't auto-open the orchestrator and crowd the screenshot.
     await page.goto('/#/idea/new')
 
-    const result = await page.evaluate(async () => {
-      // Reuse the seeded "Optimize bulk import performance" idea so this
-      // test doesn't create a duplicate when the prior test already
-      // seeded it.
-      // @ts-expect-error wails binding
-      const ideas = (await window.go.app.App.ListIdeas()) as Array<{ name: string; slug: string }>
-      let slug = ideas.find((i) => i.name === 'Optimize bulk import performance')?.slug
-      if (!slug) {
-        // @ts-expect-error wails binding
-        slug = (await window.go.app.App.CreateIdea('Optimize bulk import performance', 'active', 'Investigate batched-insert strategies for the import pipeline')) as string
-      }
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartIdeaSession(slug, 'testagent', false)) as { uuid: string }
-      return { slug, uuid: r.uuid }
-    })
+    // Reuse the seeded "Optimize bulk import performance" idea so this
+    // test doesn't create a duplicate when the prior test already
+    // seeded it.
+    const ideas = await callBinding<Array<{ name: string; slug: string }>>(page, 'ListIdeas')
+    let slug = ideas.find((i) => i.name === 'Optimize bulk import performance')?.slug
+    if (!slug) {
+      slug = await callBinding<string>(page, 'CreateIdea', 'Optimize bulk import performance', 'active', 'Investigate batched-insert strategies for the import pipeline')
+    }
+    const r = await callBinding<{ uuid: string }>(page, 'StartIdeaSession', slug, 'testagent', false)
+    const result = { slug, uuid: r.uuid }
 
     await page.evaluate((slug) => {
       window.location.hash = `/idea/${slug}`
@@ -188,29 +184,20 @@ test.describe('Screenshots', () => {
     // shows multiple chips (alongside the one already running from
     // the idea-detail test) — gives the hero shot a busy workspace
     // feel rather than a single solo session.
-    const searchIdeaSlug = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const ideas = (await window.go.app.App.ListIdeas()) as Array<{ name: string; slug: string }>
-      let slug = ideas.find((i) => i.name === 'Evaluate search index strategy')?.slug
-      if (!slug) {
-        // @ts-expect-error wails binding
-        slug = (await window.go.app.App.CreateIdea(
-          'Evaluate search index strategy',
-          'active',
-          'Compare incremental vs full-rebuild index approaches',
-        )) as string
-      }
-      return slug
-    })
-    await page.evaluate(async (slug) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartIdeaSession(slug, 'testagent', false)
-    }, searchIdeaSlug)
+    const searchIdeas = await callBinding<Array<{ name: string; slug: string }>>(page, 'ListIdeas')
+    let searchIdeaSlug = searchIdeas.find((i) => i.name === 'Evaluate search index strategy')?.slug
+    if (!searchIdeaSlug) {
+      searchIdeaSlug = await callBinding<string>(
+        page,
+        'CreateIdea',
+        'Evaluate search index strategy',
+        'active',
+        'Compare incremental vs full-rebuild index approaches',
+      )
+    }
+    await callBinding(page, 'StartIdeaSession', searchIdeaSlug, 'testagent', false)
 
-    const orchUUID = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      return ((await window.go.app.App.StartRootSession('testagent')) as { uuid: string }).uuid
-    })
+    const orchUUID = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     await page.reload()
     await expect(page.locator('[data-testid="orchestrator-drawer"]')).toBeVisible({ timeout: 5000 })
@@ -224,10 +211,10 @@ test.describe('Screenshots', () => {
     await waitForAgentReady(page, orchUUID)
     // The replay write into xterm is async; injecting before it lands
     // gets the transcript overwritten.
-    await page.waitForFunction(
-      (id) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const buf = (window as any).__ideateTerminals?.[id]?.buffer.active
+    await waitForTerminals(
+      page,
+      (reg, id: string) => {
+        const buf = reg?.[id]?.buffer.active
         if (!buf) return false
         for (let i = 0; i < buf.length; i++) {
           if (buf.getLine(i)?.translateToString(true).includes('mcp connected:')) return true
@@ -241,10 +228,9 @@ test.describe('Screenshots', () => {
     // Inject the hero transcript directly into xterm — bypasses the
     // PTY (we want it to render as if it were agent output, not user
     // input). xterm 6 exposes terminal.write(data); we look up the
-    // orchestrator's terminal instance via __ideateTerminals.
-    await page.evaluate((transcript) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as Record<string, { write: (data: string) => void; element?: HTMLElement }> | undefined
+    // orchestrator's terminal instance from the terminal registry.
+    await evalTerminals(page, (regAny, transcript: string) => {
+      const reg = regAny as Record<string, { write: (data: string) => void; element?: HTMLElement }> | undefined
       if (!reg) return
       // The orchestrator terminal is mounted in .orchestrator-host (the
       // App-root overlay), not inside .orchestrator-drawer — the drawer
@@ -263,10 +249,10 @@ test.describe('Screenshots', () => {
     // Wait for the tail of the transcript to land before snapping —
     // a row containing "delivered." is the last visible line; if
     // it's present xterm has finished rendering everything above.
-    await page.waitForFunction(
-      () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const reg = (window as any).__ideateTerminals as Record<string, {
+    await waitForTerminals(
+      page,
+      (regAny) => {
+        const reg = regAny as Record<string, {
           buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } }
         }> | undefined
         if (!reg) return false

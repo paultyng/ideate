@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { promises as fs } from 'fs'
 import * as path from 'path'
-import { AGENT_LIFECYCLE_TIMEOUT_MS, getMountedSessionId, waitForAgentReady } from './ptyCapture'
+import { AGENT_LIFECYCLE_TIMEOUT_MS, waitForAgentReady } from './ptyCapture'
+import { callBinding, getMountedSessionId } from './backend'
 
 const projectsDir = process.env.TEST_CLAUDE_PROJECTS_DIR || ''
 const ideasDir = process.env.TEST_IDEAS_DIR || ''
@@ -45,10 +46,7 @@ async function expandSessions(page: import('@playwright/test').Page) {
 }
 
 async function runSync(page: import('@playwright/test').Page) {
-  await page.evaluate(async () => {
-    // @ts-expect-error wails runtime binding (dev build only)
-    await window.go.app.App.RunClaudeSync()
-  })
+  await callBinding(page, 'RunClaudeSync')
 }
 
 async function writeTranscript(slug: string, sessUUID: string, entrypoint: string) {

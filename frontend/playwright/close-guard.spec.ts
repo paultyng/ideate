@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
+import { emitEvent, getBindingCalls, stubBinding } from './backend'
 
 // CloseGuardDialog renders when Go-side `App.BeforeClose` emits the
 // `app:close-blocked` Wails event because one or more sessions are
@@ -7,7 +8,7 @@ import { test, expect, Page } from '@playwright/test'
 // guard).
 //
 // These tests drive the event from the frontend via
-// `window.runtime.EventsEmit` rather than triggering the real close
+// `emitEvent` rather than triggering the real close
 // flow — Wails has no clean Playwright hook for "the window is
 // closing", and the dialog's contract is the event payload it sees.
 // The button handlers' Wails bindings (`ForceQuit`) are stubbed so we
@@ -18,35 +19,16 @@ const FAKE_BUSY = [
   { slug: 'another',   ideaName: 'Another',   uuid: 'uuid-2', agentType: 'testagent',  activity: 'waiting' },
 ]
 
-interface WailsRuntime {
-  EventsEmit: (eventName: string, ...data: unknown[]) => void
-}
-interface PageGlobals {
-  runtime?: WailsRuntime
-  go?: { app?: { App?: { ForceQuit?: () => Promise<void> } } }
-  __forceQuitCalls?: number
-}
-
 async function fireCloseBlocked(page: Page, busy: unknown): Promise<void> {
-  await page.evaluate((payload) => {
-    const w = window as unknown as PageGlobals
-    w.runtime?.EventsEmit?.('app:close-blocked', payload)
-  }, busy)
+  await emitEvent(page, 'app:close-blocked', busy)
 }
 
 async function stubForceQuit(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as PageGlobals
-    w.__forceQuitCalls = 0
-    if (!w.go?.app?.App) return
-    w.go.app.App.ForceQuit = async () => {
-      w.__forceQuitCalls = (w.__forceQuitCalls ?? 0) + 1
-    }
-  })
+  await stubBinding(page, 'ForceQuit')
 }
 
 async function forceQuitCallCount(page: Page): Promise<number> {
-  return page.evaluate(() => (window as unknown as PageGlobals).__forceQuitCalls ?? 0)
+  return (await getBindingCalls(page, 'ForceQuit')).length
 }
 
 test.describe('Close guard dialog', () => {

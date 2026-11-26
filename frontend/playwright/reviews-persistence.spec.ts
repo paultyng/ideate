@@ -1,6 +1,7 @@
 import { test, expect, Page } from '@playwright/test'
 import * as fs from 'fs'
 import * as path from 'path'
+import { callBinding } from './backend'
 
 // Survival across app close/reopen has two halves: drafts persist to disk
 // while editing, and the footer's alerts zone surfaces pending reviews
@@ -374,10 +375,7 @@ test.describe('Pending reviews bar — chip surfaces open reviews', () => {
     // CancelReview emits review:changed. The bar should react well
     // before the 30s polling backstop — assert with a short timeout
     // so a regression that drops the event listener fails fast.
-    await page.evaluate(async (reviewId) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.CancelReview(reviewId)
-    }, id)
+    await callBinding(page, 'CancelReview', id)
     await expect(chip).toBeHidden({ timeout: 5000 })
   })
 })

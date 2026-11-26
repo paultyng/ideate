@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
-import { AGENT_LIFECYCLE_TIMEOUT_MS, getMountedSessionId, waitForAgentReady } from './ptyCapture'
+import { AGENT_LIFECYCLE_TIMEOUT_MS, waitForAgentReady } from './ptyCapture'
+import { getMountedSessionId } from './backend'
 
 async function createIdea(page: import('@playwright/test').Page, name: string): Promise<string> {
   await page.goto('/#/idea/new')

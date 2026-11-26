@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { stopAllRunningSessions } from './ptyCapture'
+import { callBinding, cancelPendingReviews } from './backend'
 
 // User report: after opening a markdown review and navigating back to
 // a session, the footer's current-session chip renders cut off /
@@ -27,11 +28,8 @@ async function requestMarkdownReview(page: import('@playwright/test').Page, file
   // os.ReadFile + path validation runs the same code as in production.
   const tmpFile = path.join(os.tmpdir(), `ideate-md-${Date.now()}-${Math.floor(Math.random() * 1e6)}.md`)
   await fs.promises.writeFile(tmpFile, fileContent)
-  const reviewId = await page.evaluate(async (p) => {
-    // @ts-expect-error wails binding
-    const r = (await window.go.app.App.RequestMarkdownReview(p, '')) as { id: string }
-    return r.id
-  }, tmpFile)
+  const r = await callBinding<{ id: string }>(page, 'RequestMarkdownReview', tmpFile, '')
+  const reviewId = r.id
   return reviewId
 }
 
@@ -50,15 +48,7 @@ test.describe('Footer chip survives review→session navigation', () => {
   // central reviews store reaches the same terminal state production
   // hits after a user dismiss.
   test.afterEach(async ({ page }) => {
-    await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const W = (window as any)
-      if (!W.go?.app?.App?.ListPendingReviews) return
-      const pending = (await W.go.app.App.ListPendingReviews()) ?? []
-      for (const r of pending) {
-        try { await W.go.app.App.CancelReview(r.id) } catch { /* already gone */ }
-      }
-    })
+    await cancelPendingReviews(page)
     await stopAllRunningSessions(page)
   })
 

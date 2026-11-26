@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { enablePtyCapture, readSessionReplay, stopAllRunningSessions, waitForAgentReady } from './ptyCapture'
+import { captureBrowserOpenURL, evalTerminals, waitForTerminals, type TerminalRegistry, callBinding } from './backend'
 
 // Coverage for terminal OSC 8 hyperlink clicks in the orchestrator
 // drawer's TerminalPanel. Drives the upstream paultyng/testagent
@@ -8,7 +9,7 @@ import { enablePtyCapture, readSessionReplay, stopAllRunningSessions, waitForAge
 //   /link <url> [text]
 //   →  <ESC>]8;;<url><ESC>\<text><ESC>]8;;<ESC>\
 //
-// The spec patches window.runtime.BrowserOpenURL, clicks the rendered
+// The spec patches the runtime's BrowserOpenURL, clicks the rendered
 // link's canvas coords, and asserts the URL was captured — proves
 // xterm's linkHandler → openExternal → BrowserOpenURL path works
 // in the drawer (where a previously-reported click bug lived).
@@ -17,20 +18,13 @@ interface OpenURLCapture {
   urls: string[]
 }
 
-// Patch window.runtime.BrowserOpenURL so we can observe what
+// Patch the runtime's BrowserOpenURL so we can observe what
 // openExternal would route through. The wails runtime helper
 // (frontend/src/wailsjs/runtime/runtime.js BrowserOpenURL) just
-// forwards to window.runtime.BrowserOpenURL — patching here covers
+// forwards to the runtime's BrowserOpenURL — patching here covers
 // every code path that ends up calling it.
 async function patchBrowserOpenURL(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as Record<string, unknown>
-    const captured: string[] = []
-    w.__capturedOpenURLs = captured
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rt = (w as any).runtime ?? ((w as any).runtime = {})
-    rt.BrowserOpenURL = (url: string) => { captured.push(url) }
-  })
+  await captureBrowserOpenURL(page, '__capturedOpenURLs')
 }
 
 async function getCapturedURLs(page: import('@playwright/test').Page): Promise<OpenURLCapture> {
@@ -88,9 +82,7 @@ async function clickLinkRow(
 
   const queryArgs = { sel: containerSelector, needle: linkText, requireOscLink }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const queryFn = ({ sel, needle, requireOscLink }: typeof queryArgs): any => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
+  const queryFn = (reg: TerminalRegistry | undefined, { sel, needle, requireOscLink }: typeof queryArgs): any => {
     if (!reg) return null
     const root = document.querySelector(sel) as HTMLElement | null
     if (!root) return null
@@ -155,10 +147,10 @@ async function clickLinkRow(
   if (requireOscLink) {
     // waitForFunction polls until queryFn returns a truthy object; we then
     // jsonValue() it back into the test-side shape.
-    const jsHandle = await page.waitForFunction(queryFn, queryArgs, { timeout: timeoutMs })
+    const jsHandle = await waitForTerminals(page, queryFn, queryArgs, { timeout: timeoutMs })
     meta = (await jsHandle.jsonValue()) as typeof meta
   } else {
-    meta = (await page.evaluate(queryFn, queryArgs)) as typeof meta
+    meta = (await evalTerminals(page, queryFn, queryArgs)) as typeof meta
   }
   if (!meta) return false
 
@@ -183,11 +175,7 @@ test.describe('Terminal link clicks', () => {
     await page.goto('/')
     await enablePtyCapture(page)
 
-    const uuid = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-      return r.uuid
-    })
+    const uuid = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     const containerSelector = '.orchestrator-host .terminal-container'
     await page.waitForSelector(containerSelector, { timeout: 10000 })
@@ -203,10 +191,7 @@ test.describe('Terminal link clicks', () => {
     // BrowserOpenURL so the assertion can confirm the link click
     // routed through xterm's linkHandler (not WebLinksAddon's regex
     // matcher, which would fire if the user clicked a bare URL).
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(id, '/link https://example.com/from-testagent?via=osc8 example link\r')
-    }, uuid)
+    await callBinding(page, 'WriteToSession', uuid, '/link https://example.com/from-testagent?via=osc8 example link\r')
 
     // Read on-screen state via vscreen replay — the link text is
     // currently visible on the agent's screen and we want the check
@@ -226,21 +211,14 @@ test.describe('Terminal link clicks', () => {
     await page.goto('/')
     await enablePtyCapture(page)
 
-    const uuid = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-      return r.uuid
-    })
+    const uuid = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     const containerSelector = '.orchestrator-host .terminal-container'
     await page.waitForSelector(containerSelector, { timeout: 10000 })
     await patchBrowserOpenURL(page)
     await waitForAgentReady(page, uuid)
 
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(id, 'visit https://example.com/plain-url?via=weblinks for docs\r')
-    }, uuid)
+    await callBinding(page, 'WriteToSession', uuid, 'visit https://example.com/plain-url?via=weblinks for docs\r')
 
     await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
       .toContain('https://example.com/plain-url?via=weblinks')
@@ -256,11 +234,7 @@ test.describe('Terminal link clicks', () => {
     await page.goto('/')
     await enablePtyCapture(page)
 
-    const uuid = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-      return r.uuid
-    })
+    const uuid = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     const containerSelector = '.orchestrator-host .terminal-container'
     await page.waitForSelector(containerSelector, { timeout: 10000 })
@@ -269,10 +243,7 @@ test.describe('Terminal link clicks', () => {
 
     // Type an ideate:// URL into the terminal so WebLinksAddon's
     // extended urlRegex (matches https?|ideate) picks it up.
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(id, 'open ideate://orchestrator for cross-idea work\r')
-    }, uuid)
+    await callBinding(page, 'WriteToSession', uuid, 'open ideate://orchestrator for cross-idea work\r')
 
     await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
       .toContain('ideate://orchestrator')
@@ -297,11 +268,7 @@ test.describe('Terminal link clicks', () => {
     await page.goto('/')
     await enablePtyCapture(page)
 
-    const uuid = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-      return r.uuid
-    })
+    const uuid = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     const containerSelector = '.orchestrator-host .terminal-container'
     await page.waitForSelector(containerSelector, { timeout: 10000 })
@@ -313,10 +280,7 @@ test.describe('Terminal link clicks', () => {
     // pattern as the https variant above, but a different scheme.
     // requireOscLink on clickLinkRow ensures the click targets the
     // OSC 8 cell, not a plain-text URL match.
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(id, '/link ideate://orchestrator orchestrator surface\r')
-    }, uuid)
+    await callBinding(page, 'WriteToSession', uuid, '/link ideate://orchestrator orchestrator surface\r')
 
     await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
       .toContain('orchestrator surface')
@@ -335,21 +299,14 @@ test.describe('Terminal link clicks', () => {
     await page.goto('/')
     await enablePtyCapture(page)
 
-    const uuid = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-      return r.uuid
-    })
+    const uuid = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     const containerSelector = '.orchestrator-host .terminal-container'
     await page.waitForSelector(containerSelector, { timeout: 10000 })
     await patchBrowserOpenURL(page)
     await waitForAgentReady(page, uuid)
 
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(id, '/link https://example.com/from-testagent?via=osc8-after-drag example link drag\r')
-    }, uuid)
+    await callBinding(page, 'WriteToSession', uuid, '/link https://example.com/from-testagent?via=osc8-after-drag example link drag\r')
 
     await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
       .toContain('example link drag')
@@ -384,21 +341,14 @@ test.describe('Terminal link clicks', () => {
     await page.goto('/')
     await enablePtyCapture(page)
 
-    const uuid = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-      return r.uuid
-    })
+    const uuid = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     const containerSelector = '.orchestrator-host .terminal-container'
     await page.waitForSelector(containerSelector, { timeout: 10000 })
     await patchBrowserOpenURL(page)
     await waitForAgentReady(page, uuid)
 
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(id, 'visit https://example.com/plain-url?via=weblinks-after-drag for docs\r')
-    }, uuid)
+    await callBinding(page, 'WriteToSession', uuid, 'visit https://example.com/plain-url?via=weblinks-after-drag for docs\r')
 
     await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
       .toContain('https://example.com/plain-url?via=weblinks-after-drag')
@@ -443,11 +393,7 @@ test.describe('Terminal link clicks', () => {
     await page.goto('/#/idea/new')
     await enablePtyCapture(page)
 
-    const uuid = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-      return r.uuid
-    })
+    const uuid = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     await page.click('button[aria-label="Orchestrator"]')
     const containerSelector = '.orchestrator-host .terminal-container'
@@ -455,10 +401,7 @@ test.describe('Terminal link clicks', () => {
     await patchBrowserOpenURL(page)
     await waitForAgentReady(page, uuid)
 
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(id, '/link https://example.com/from-testagent?via=osc8-after-hide-show example link hide show\r')
-    }, uuid)
+    await callBinding(page, 'WriteToSession', uuid, '/link https://example.com/from-testagent?via=osc8-after-hide-show example link hide show\r')
 
     await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
       .toContain('example link hide show')
@@ -483,11 +426,7 @@ test.describe('Terminal link clicks', () => {
     await page.goto('/#/idea/new')
     await enablePtyCapture(page)
 
-    const uuid = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-      return r.uuid
-    })
+    const uuid = (await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')).uuid
 
     await page.click('button[aria-label="Orchestrator"]')
     const containerSelector = '.orchestrator-host .terminal-container'
@@ -495,10 +434,7 @@ test.describe('Terminal link clicks', () => {
     await patchBrowserOpenURL(page)
     await waitForAgentReady(page, uuid)
 
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(id, 'visit https://example.com/plain-url?via=weblinks-after-hide-show for docs\r')
-    }, uuid)
+    await callBinding(page, 'WriteToSession', uuid, 'visit https://example.com/plain-url?via=weblinks-after-hide-show for docs\r')
 
     await expect.poll(() => readSessionReplay(page, uuid), { timeout: 10000 })
       .toContain('https://example.com/plain-url?via=weblinks-after-hide-show')

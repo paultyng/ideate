@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { AGENT_LIFECYCLE_TIMEOUT_MS, stopAllRunningSessions, waitForAgentReady } from './ptyCapture'
+import { callBinding, waitForBindings, evalTerminals, waitForTerminals } from './backend'
 
 // Demo specs produce the README's animated GIFs. Each test name maps
 // 1:1 to a `docs/media/<name>.gif` output via `task generate:demos`,
@@ -110,12 +111,7 @@ const ORCH_QUICK_TURNS: string[] = [
 // commands so /think completes its spinner before the next write.
 async function populateSession(page: Page, uuid: string, turns: string[]): Promise<void> {
   for (const line of turns) {
-    await page.evaluate(async ({ uuid, line }) => {
-      const W = window as unknown as { go: { app: { App: {
-        WriteToSession: (uuid: string, data: string) => Promise<void>;
-      } } } }
-      await W.go.app.App.WriteToSession(uuid, line + '\r')
-    }, { uuid, line })
+    await callBinding(page, 'WriteToSession', uuid, line + '\r')
     await page.waitForTimeout(line.startsWith('/think') ? 600 : 250)
   }
 }
@@ -133,8 +129,7 @@ test.describe('Demos', () => {
     const page = await browser.newPage({ baseURL: testInfo.project.use.baseURL })
     try {
       await page.goto('/')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await page.waitForFunction(() => (window as any).go?.app?.App)
+      await waitForBindings(page)
       await stopAllRunningSessions(page)
     } finally {
       await page.close()
@@ -154,21 +149,16 @@ test.describe('Demos', () => {
     // populated transcript. The orchestrator session populates the
     // pinned drawer at the top of the dashboard so it isn't empty
     // during the initial GIF frames.
-    const { orchUUID, latencyUUID, latencySlug } = await page.evaluate(async () => {
-      const W = window as unknown as { go: { app: { App: {
-        ListIdeas: () => Promise<Array<{ name: string; slug: string }>>;
-        StartRootSession: (agent: string) => Promise<{ uuid: string }>;
-        StartIdeaSession: (slug: string, agent: string, resume: boolean) => Promise<{ uuid: string }>;
-      } } } }
-      const ideas = await W.go.app.App.ListIdeas()
-      const latency = ideas.find((i) => i.name === 'p99 latency regression in search')
-      if (!latency) throw new Error('latency idea not seeded')
-      const [orch, lat] = await Promise.all([
-        W.go.app.App.StartRootSession('testagent'),
-        W.go.app.App.StartIdeaSession(latency.slug, 'testagent', false),
-      ])
-      return { orchUUID: orch.uuid, latencyUUID: lat.uuid, latencySlug: latency.slug }
-    })
+    const ideas = await callBinding<Array<{ name: string; slug: string }>>(page, 'ListIdeas')
+    const latency = ideas.find((i) => i.name === 'p99 latency regression in search')
+    if (!latency) throw new Error('latency idea not seeded')
+    const [orch, lat] = await Promise.all([
+      callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent'),
+      callBinding<{ uuid: string }>(page, 'StartIdeaSession', latency.slug, 'testagent', false),
+    ])
+    const { uuid: orchUUID } = orch
+    const { uuid: latencyUUID } = lat
+    const latencySlug = latency.slug
 
     // Wait for both testagents to finish booting (MCP connected).
     // Without this, WriteToSession bytes race the agents' first render
@@ -216,9 +206,10 @@ test.describe('Demos', () => {
     // Wait for the populated transcript to render in the new xterm
     // before holding the final frame. Without this, the GIF can end
     // on a still-blank terminal that hasn't finished vscreen replay.
-    await page.waitForFunction(
-      (uuid) => {
-        const reg = (window as unknown as Record<string, unknown>).__ideateTerminals as
+    await waitForTerminals(
+      page,
+      (regAny, uuid: string) => {
+        const reg = regAny as
           Record<string, { buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } } }>
           | undefined
         const term = reg?.[uuid]
@@ -310,19 +301,12 @@ existing search infrastructure and avoids the dual-write footgun.
     // best-effort: a prior test in this file may already have started
     // sessions in the shared TEST_CONFIG, and the duplicate-start
     // rejection is fine — we only need *some* session running.
-    await page.evaluate(async () => {
-      const W = window as unknown as { go: { app: { App: {
-        ListIdeas: () => Promise<Array<{ name: string; slug: string }>>;
-        StartIdeaSession: (slug: string, agent: string, resume: boolean) => Promise<unknown>;
-        StartRootSession: (agent: string) => Promise<unknown>;
-      } } } }
-      const ideas = await W.go.app.App.ListIdeas()
-      const slug = ideas.find((i) => i.name === 'p99 latency regression in search')?.slug
-      if (slug) {
-        try { await W.go.app.App.StartIdeaSession(slug, 'testagent', false) } catch { /* already running */ }
-      }
-      try { await W.go.app.App.StartRootSession('testagent') } catch { /* already running */ }
-    })
+    const seededIdeas = await callBinding<Array<{ name: string; slug: string }>>(page, 'ListIdeas')
+    const seededSlug = seededIdeas.find((i) => i.name === 'p99 latency regression in search')?.slug
+    if (seededSlug) {
+      try { await callBinding(page, 'StartIdeaSession', seededSlug, 'testagent', false) } catch { /* already running */ }
+    }
+    try { await callBinding(page, 'StartRootSession', 'testagent') } catch { /* already running */ }
 
     await page.reload()
     await expect(page.locator('[data-testid="orchestrator-drawer"]')).toBeVisible({ timeout: 5000 })
@@ -331,10 +315,10 @@ existing search infrastructure and avoids the dual-write footgun.
 
     // Wait for testagent's banner to land so subsequent writes happen
     // on a stable baseline.
-    await page.waitForFunction(
-      () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const reg = (window as any).__ideateTerminals as Record<string, {
+    await waitForTerminals(
+      page,
+      (regAny) => {
+        const reg = regAny as Record<string, {
           buffer: { active: { length: number; getLine: (i: number) => { translateToString: (trim: boolean) => string } | undefined } }
         }> | undefined
         if (!reg) return false
@@ -356,9 +340,8 @@ existing search infrastructure and avoids the dual-write footgun.
     // Write each turn-block into the orchestrator's xterm with a pause
     // between, producing the typewriter-on-turn animation.
     for (const turn of HERO_TURNS) {
-      await page.evaluate((chunk) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const reg = (window as any).__ideateTerminals as Record<string, { write: (data: string) => void; element?: HTMLElement }> | undefined
+      await evalTerminals(page, (regAny, chunk: string) => {
+        const reg = regAny as Record<string, { write: (data: string) => void; element?: HTMLElement }> | undefined
         if (!reg) return
         const host = document.querySelector('.orchestrator-host')
         if (!host) return

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { callBinding } from './backend'
 
 test.describe('Ideas', () => {
   test('renders idea list with new idea topbar button', async ({ page }) => {
@@ -123,12 +124,8 @@ test.describe('Ideas', () => {
     // idea's detail page. Direct App.CreateIdea matches the pattern
     // used in dashboard / orchestrator tests and is faster.
     await page.goto('/')
-    await page.evaluate(async ({ archivedName, activeName }) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.CreateIdea(archivedName, 'archived', '')
-      // @ts-expect-error wails binding
-      await window.go.app.App.CreateIdea(activeName, 'active', '')
-    }, { archivedName, activeName })
+    await callBinding(page, 'CreateIdea', archivedName, 'archived', '')
+    await callBinding(page, 'CreateIdea', activeName, 'active', '')
     // Force a re-render so the dashboard picks up the new ideas.
     await page.reload()
     await expect(page.locator('button[aria-label="Home"]')).toBeVisible()
