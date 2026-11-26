@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+
+	"github.com/paultyng/ideate/internal/config"
 )
 
 // SocketPath returns the platform-specific path for the IPC Unix domain socket.
@@ -16,11 +18,7 @@ func SocketPath() (string, error) {
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolving home directory: %w", err)
-		}
-		return filepath.Join(home, "Library", "Application Support", "ideate", "ideate.sock"), nil
+		return filepath.Join(config.DefaultConfigDir(), "ideate.sock"), nil
 
 	case "linux":
 		if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {

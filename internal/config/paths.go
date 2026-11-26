@@ -4,12 +4,29 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"testing"
 )
+
+// isolatedDir returns a throwaway dir for bindings builds (which run the app
+// on the build machine) and panics under go test, so neither touches real
+// user data when the env var is unset.
+func isolatedDir(envVar, name string) (string, bool) {
+	if bindingsBuild {
+		return filepath.Join(os.TempDir(), "ideate-bindings", name), true
+	}
+	if testing.Testing() {
+		panic(envVar + " must be set in tests")
+	}
+	return "", false
+}
 
 // DefaultIdeasDir returns the directory for storing ideas.
 // Respects IDEATE_IDEAS_DIR env var for dev/test isolation.
 func DefaultIdeasDir() string {
 	if dir := os.Getenv("IDEATE_IDEAS_DIR"); dir != "" {
+		return dir
+	}
+	if dir, ok := isolatedDir("IDEATE_IDEAS_DIR", "ideas"); ok {
 		return dir
 	}
 	home, _ := os.UserHomeDir()
@@ -21,6 +38,9 @@ func DefaultIdeasDir() string {
 // Respects IDEATE_CONFIG_DIR env var for dev/test isolation.
 func DefaultConfigDir() string {
 	if dir := os.Getenv("IDEATE_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	if dir, ok := isolatedDir("IDEATE_CONFIG_DIR", "config"); ok {
 		return dir
 	}
 	switch runtime.GOOS {
@@ -67,6 +87,9 @@ func LogsDir(configDir string) string {
 // dev/test isolation.
 func DefaultClaudeProjectsDir() string {
 	if dir := os.Getenv("IDEATE_CLAUDE_PROJECTS_DIR"); dir != "" {
+		return dir
+	}
+	if dir, ok := isolatedDir("IDEATE_CLAUDE_PROJECTS_DIR", "claude-projects"); ok {
 		return dir
 	}
 	home, err := os.UserHomeDir()

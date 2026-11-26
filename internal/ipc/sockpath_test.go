@@ -5,7 +5,7 @@ import (
 )
 
 func TestSocketPath(t *testing.T) {
-	t.Parallel()
+	t.Setenv("IDEATE_CONFIG_DIR", t.TempDir())
 
 	path, err := SocketPath()
 	if err != nil {
