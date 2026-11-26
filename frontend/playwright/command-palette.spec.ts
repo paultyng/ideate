@@ -208,6 +208,58 @@ test.describe('Command palette', () => {
     }), { timeout: 2000 }).toBe(true)
   })
 
+  // Regression for the focusOrchestratorHelper generation guard: picking
+  // Orchestrator then (after Esc) any other entry must cancel the pending
+  // rAF poll, so a host mounting later does not steal focus.
+  //
+  // Real timing makes this racy (a fast host mount focuses legitimately
+  // before the second pick). So requestAnimationFrame is replaced with a
+  // manual queue and the host is a stand-in element injected only after
+  // the second pick; without the guard the still-pending poll finds it
+  // on the next flush and focuses it.
+  test('switching to another pick cancels the orchestrator focus poll', async ({ page }) => {
+    await page.goto('/#/idea/new')
+    await expect(page.locator('[data-testid="orchestrator-drawer"]')).toHaveCount(0)
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __rafQueue: FrameRequestCallback[] }
+      w.__rafQueue = []
+      window.requestAnimationFrame = (cb) => w.__rafQueue.push(cb)
+    })
+    const flushFrames = (n: number) => page.evaluate((count) => {
+      const w = window as unknown as { __rafQueue: FrameRequestCallback[] }
+      for (let i = 0; i < count; i++) {
+        const cbs = w.__rafQueue.splice(0)
+        cbs.forEach((cb) => cb(performance.now()))
+      }
+    }, n)
+
+    await openPalette(page)
+    await page.keyboard.press('Enter') // pick Orchestrator; poll is now queued
+    await page.locator('body').press('Escape')
+    await openPalette(page)
+    await page.keyboard.press('ArrowDown') // first non-Orchestrator entry
+    await page.keyboard.press('Enter')
+    await expect(page.locator('[data-testid="command-palette"]')).toHaveCount(0)
+
+    // The host "mounts" now; the poll window (10 frames) is still open.
+    await page.evaluate(() => {
+      const host = document.createElement('div')
+      host.className = 'orchestrator-host'
+      const helper = document.createElement('textarea')
+      helper.className = 'xterm-helper-textarea'
+      host.appendChild(helper)
+      document.body.appendChild(host)
+    })
+    await flushFrames(12)
+
+    const focusInOrch = await page.evaluate(() => {
+      const helper = document.querySelector('.orchestrator-host .xterm-helper-textarea')
+      return helper !== null && document.activeElement === helper
+    })
+    expect(focusInOrch).toBe(false)
+  })
+
   // Dashboard pin navigates to / (the existing browse surface).
   test('selecting Dashboard navigates to /', async ({ page }) => {
     await createIdea(page, `Palette Dash ${Date.now()}`)
