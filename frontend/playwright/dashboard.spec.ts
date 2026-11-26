@@ -1,30 +1,10 @@
 import { test, expect } from '@playwright/test'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { stopAllRunningSessions } from './ptyCapture'
+import { stopAllRunningSessions, waitForAgentReady } from './ptyCapture'
 import { callBinding, emitEvent, evalTerminals, waitForTerminals } from './backend'
 
 const ideasDir = process.env.TEST_IDEAS_DIR || ''
-
-// Overwrites the running session.json's `activity` field for `slug` —
-// simulates the agent activity-hook flips (active/idle/waiting) without
-// having to drive a real PTY into the right state. The watcher then
-// fires `idea:changed`, prompting the bar to refresh.
-async function patchSessionActivity(slug: string, activity: string) {
-  const sessionsDir = path.join(ideasDir, slug, 'sessions')
-  const entries = await fs.readdir(sessionsDir)
-  for (const entry of entries) {
-    if (!entry.endsWith('.json')) continue
-    const p = path.join(sessionsDir, entry)
-    const raw = JSON.parse(await fs.readFile(p, 'utf-8'))
-    if (raw.status === 'running') {
-      raw.activity = activity
-      await fs.writeFile(p, JSON.stringify(raw, null, 2))
-      return
-    }
-  }
-  throw new Error(`no running session found for slug ${slug}`)
-}
 
 async function createIdea(page: import('@playwright/test').Page, name: string): Promise<string> {
   await page.goto('/#/idea/new')
@@ -617,8 +597,9 @@ test.describe('Dashboard', () => {
     await page.goto('/')
 
     const slug = await callBinding<string>(page, 'CreateIdea', `Glow ${Date.now()}`, 'active', '')
-    await callBinding(page, 'StartIdeaSession', slug, 'testagent', false)
-    await patchSessionActivity(slug, 'waiting')
+    const { uuid } = await callBinding<{ uuid: string }>(page, 'StartIdeaSession', slug, 'testagent', false)
+    await waitForAgentReady(page, uuid)
+    await callBinding(page, 'ForceSessionActivity', uuid, 'waiting')
 
     const overflowEl = page.locator('.global-session-overflow')
     await expect(overflowEl).toBeVisible({ timeout: 10000 })
