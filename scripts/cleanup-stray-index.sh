@@ -35,7 +35,7 @@ root="$(cd "$root" && pwd -P)"
 if cutoff=$(date -u -d "$SINCE" +%s 2>/dev/null); then :; else
 	cutoff=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$SINCE" +%s)
 fi
-mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"; }
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 
 is_generated() {
 	awk '
@@ -53,14 +53,27 @@ in_excluded_path() {
 	local rel="$1" dir seg depth=0 acc=""
 	dir="$(dirname "$rel")"
 	[ "$dir" = "." ] && return 1
-	local IFS=/
+	local IFS=/ result=1
+	set -f
 	for seg in $dir; do
-		case "$seg" in .*) return 0 ;; esac
+		case "$seg" in .*) result=0; break ;; esac
 		depth=$((depth + 1))
 		acc="${acc:+$acc/}$seg"
-		if [ "$depth" -ge 2 ] && [ -e "$root/$acc/.git" ]; then return 0; fi
+		if [ "$depth" -ge 2 ] && [ -e "$root/$acc/.git" ]; then result=0; break; fi
 	done
-	return 1
+	set +f
+	return "$result"
+}
+
+# True when $1 or any ancestor up to $root has a .git entry (file or dir).
+has_git_entry() {
+	local d="$1"
+	while :; do
+		[ -e "$d/.git" ] && return 0
+		[ "$d" = "$root" ] && return 1
+		d="$(dirname "$d")"
+		case "$d" in "$root"/*) ;; "$root") ;; *) return 1 ;; esac
+	done
 }
 
 # Echoes keep|tracked|skip; skip reasons go to stderr.
@@ -69,7 +82,14 @@ untracked_status() {
 	d="$(dirname "$f")"
 	if ! out=$(git -C "$d" rev-parse --git-dir 2>&1); then
 		case "$out" in
-		*"not a git repository"*) echo keep ;;
+		*"not a git repository"*)
+			if has_git_entry "$d"; then
+				echo "broken .git above $f: $out" >&2
+				echo skip
+			else
+				echo keep
+			fi
+			;;
 		*) echo "git rev-parse failed for $f: $out" >&2; echo skip ;;
 		esac
 		return
@@ -77,7 +97,12 @@ untracked_status() {
 	rc=0
 	git -C "$d" ls-files --error-unmatch -- "$(basename "$f")" >/dev/null 2>&1 || rc=$?
 	case "$rc" in
-	0) echo tracked ;;
+	0)
+		if ! git -C "$d" diff --quiet HEAD -- "$(basename "$f")" 2>/dev/null; then
+			printf '%s\n' "$d" >>"$modified"
+		fi
+		echo tracked
+		;;
 	1) echo keep ;;
 	*) echo "git ls-files exited $rc for $f" >&2; echo skip ;;
 	esac
@@ -85,6 +110,8 @@ untracked_status() {
 
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 list="$(mktemp "${TMPDIR:-/tmp}/stray-index-$ts.XXXXXX")"
+modified="$(mktemp "${TMPDIR:-/tmp}/stray-index-modified-$ts.XXXXXX")"
+trap 'rm -f "$modified"' EXIT
 skipped=0
 
 while IFS= read -r -d '' f; do
@@ -104,14 +131,26 @@ if [ "$total" -gt 0 ]; then
 	cut -d/ -f1 "$list" | sort | uniq -c | sort -rn
 fi
 echo "list: $list"
+if [ -s "$modified" ]; then
+	echo "tracked index.md files differing from HEAD (possibly overwritten by v0.1.7); not touched:"
+	sort -u "$modified" | while IFS= read -r d; do
+		echo "  git -C '$d' restore -- index.md"
+	done
+fi
 
 if [ "$apply" -eq 1 ] && [ "$total" -gt 0 ]; then
 	dest="$HOME/Ideate-backups/stray-index-$ts"
+	moved=0
 	while IFS= read -r rel; do
 		mkdir -p "$dest/$(dirname "$rel")"
 		mv -n -- "$root/$rel" "$dest/$rel"
+		if [ -e "$root/$rel" ]; then
+			echo "not moved (destination exists): $rel" >&2
+		else
+			moved=$((moved + 1))
+		fi
 	done <"$list"
-	echo "moved $total files to $dest"
+	echo "moved $moved files to $dest"
 elif [ "$apply" -eq 0 ]; then
 	echo "dry run; pass --apply to move them"
 fi

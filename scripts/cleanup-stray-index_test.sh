@@ -16,10 +16,13 @@ moved=(
 	idea-a/.reviews/index.md
 	idea-a/.worktrees/x/index.md
 	idea-a/.worktrees/x/sub/index.md
-	idea-a/checkout/index.md
-	idea-a/checkout/sub/index.md
 	idea-a/.fm/index.md
 	idea-b/.claude/untracked/index.md
+)
+# checkout is a real worktree of idea-b, created below
+worktree_moved=(
+	idea-a/checkout/index.md
+	idea-a/checkout/sub/index.md
 )
 stay=(
 	idea-a/index.md
@@ -28,33 +31,45 @@ stay=(
 	idea-a/.prose/index.md
 	idea-a/repos/foo/.hidden/index.md
 	idea-b/.claude/index.md
+	idea-a/checkout/.claude/index.md
+	idea-c/.stale/index.md
+	idea-c/.stale/sub/index.md
 	.backups/okf-x/index.md
 )
 
 for f in "${moved[@]}"; do mk "$f"; done
 mk idea-a/.fm/index.md $'---\nokf_version: "0.2"\n---\n\n# Ideas\n\n* [A](a.md)\n'
-printf 'gitdir: /nowhere\n' >"$root/idea-a/checkout/.git"
-for f in "${stay[@]}"; do mk "$f"; done
+mkdir -p "$root/idea-c/.stale"
+printf 'gitdir: /nowhere\n' >"$root/idea-c/.stale/.git"
+for f in "${stay[@]}"; do
+	case "$f" in idea-a/checkout/*) continue ;; esac # checked out below
+	mk "$f"
+done
 mk idea-a/.prose/index.md $'# Notes\n\nSome hand-written prose.\n* [A](a.md)\n'
 touch -t 202001010000 "$root/idea-a/.old/index.md"
 
 git -C "$root/idea-b" init -q
 git -C "$root/idea-b" add .claude/index.md
 git -C "$root/idea-b" -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -q -m init
-# the tracked file is edited afterwards, so mtime is new
-touch "$root/idea-b/.claude/index.md"
+git -C "$root/idea-b" worktree add -q --detach "$root/idea-a/checkout"
+for f in "${worktree_moved[@]}"; do mk "$f"; done
+# v0.1.7 overwrote the tracked file with different generated content
+printf '# Other\n\n* [Z](z.md)\n' >"$root/idea-b/.claude/index.md"
 
 fail=0
 check() { if ! "$@"; then echo "FAIL: $*"; fail=1; fi; }
 
 "$here/cleanup-stray-index.sh" "$root" >"$tmp/dry.out"
-for f in "${moved[@]}" "${stay[@]}"; do check test -f "$root/$f"; done
-check grep -q "stray index.md files: ${#moved[@]} " "$tmp/dry.out"
+all_moved=("${moved[@]}" "${worktree_moved[@]}")
+for f in "${all_moved[@]}" "${stay[@]}"; do check test -f "$root/$f"; done
+check grep -q "stray index.md files: ${#all_moved[@]} " "$tmp/dry.out"
+check grep -q "restore -- index.md" "$tmp/dry.out"
+check grep -q "idea-b/.claude' restore" "$tmp/dry.out"
 
 "$here/cleanup-stray-index.sh" "$root" --apply >"$tmp/apply.out"
 dest="$(sed -n 's/^moved [0-9]* files to //p' "$tmp/apply.out")"
 check test -n "$dest"
-for f in "${moved[@]}"; do
+for f in "${all_moved[@]}"; do
 	check test ! -e "$root/$f"
 	check test -f "$dest/$f"
 done
