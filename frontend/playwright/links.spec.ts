@@ -1,22 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
+import { captureBrowserOpenURL, waitForBrowserOpenURL } from './backend'
 
 // Capture BrowserOpenURL calls into window.__browserOpens for assertion.
-// Wails injects window.runtime at page load (after addInitScript runs), so
+// Wails injects its runtime at page load (after addInitScript runs), so
 // we patch *after* the page is up. SPA-internal navigation (HashRouter)
 // doesn't reload, so a single patch survives the rest of the test.
 async function applyStub(page: Page) {
-  await page.waitForFunction(() => {
-    const w = window as unknown as Record<string, unknown>
-    return Boolean((w.runtime as Record<string, unknown> | undefined)?.BrowserOpenURL)
-  }, undefined, { timeout: 10000 })
-  await page.evaluate(() => {
-    const w = window as unknown as Record<string, unknown>
-    w.__browserOpens = (w.__browserOpens as string[]) ?? []
-    const runtime = w.runtime as Record<string, unknown>
-    runtime.BrowserOpenURL = (url: string) => {
-      ;(w.__browserOpens as string[]).push(url)
-    }
-  })
+  await waitForBrowserOpenURL(page, 10000)
+  await captureBrowserOpenURL(page, '__browserOpens')
 }
 
 async function stubBrowserOpenURL(page: Page) {

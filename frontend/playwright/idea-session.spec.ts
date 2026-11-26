@@ -2,11 +2,11 @@ import { test, expect } from '@playwright/test'
 import {
   AGENT_LIFECYCLE_TIMEOUT_MS,
   enablePtyCapture,
-  getMountedSessionId,
   readSessionReplay,
   stopAllRunningSessions,
   waitForAgentReady,
 } from './ptyCapture'
+import { callBinding, settleBindings, evalTerminals, getMountedSessionId } from './backend'
 
 // Helper: create an idea and return its slug from the URL.
 async function createIdea(page: import('@playwright/test').Page, name: string): Promise<string> {
@@ -26,14 +26,12 @@ async function waitForTerminal(page: import('@playwright/test').Page) {
 }
 
 // Helper: read the xterm.js buffer type ('normal' | 'alternate')
-// for the given session, via the test-only window.__ideateTerminals
+// for the given session, via the test-only terminal
 // registry. Returns 'missing' when no terminal is mounted, so the
 // caller can poll without a try/catch.
 async function readBufferType(page: import('@playwright/test').Page, sessionId: string): Promise<string> {
-  return page.evaluate((id) => {
-    const reg = (window as Window & {
-      __ideateTerminals?: Record<string, { buffer: { active: { type: string } } }>
-    }).__ideateTerminals
+  return evalTerminals(page, (regAny, id: string) => {
+    const reg = regAny as Record<string, { buffer: { active: { type: string } } }> | undefined
     return reg?.[id]?.buffer.active.type ?? 'missing'
   }, sessionId)
 }
@@ -47,13 +45,11 @@ async function readCursorState(
   page: import('@playwright/test').Page,
   sessionId: string,
 ): Promise<{ x: number; y: number; rows: number } | null> {
-  return page.evaluate((id) => {
-    const reg = (window as Window & {
-      __ideateTerminals?: Record<string, {
-        rows: number
-        buffer: { active: { cursorX: number; cursorY: number } }
-      }>
-    }).__ideateTerminals
+  return evalTerminals(page, (regAny, id: string) => {
+    const reg = regAny as Record<string, {
+      rows: number
+      buffer: { active: { cursorX: number; cursorY: number } }
+    }> | undefined
     const t = reg?.[id]
     if (!t) return null
     return { x: t.buffer.active.cursorX, y: t.buffer.active.cursorY, rows: t.rows }
@@ -139,14 +135,10 @@ test.describe('Idea Session Flow', () => {
     await waitForTerminal(page)
 
     // Stop the session via the binding for a deterministic exit.
-    await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      const active = ((await window.go.app.App.ListActiveSessions()) ?? []) as Array<{ uuid: string }>
-      const mine = active[active.length - 1]
-      if (!mine) throw new Error('no running session found')
-      // @ts-expect-error wails binding
-      await window.go.app.App.StopSession(mine.uuid)
-    })
+    const active = ((await callBinding<Array<{ uuid: string }> | null>(page, 'ListActiveSessions')) ?? [])
+    const mine = active[active.length - 1]
+    if (!mine) throw new Error('no running session found')
+    await callBinding(page, 'StopSession', mine.uuid)
 
     // View should transition without any user navigation. Metadata
     // div is the marker for the completed branch.
@@ -329,15 +321,8 @@ test.describe('Idea Session Flow', () => {
     await waitForTerminal(page)
 
     // Call the binding directly, simulating a UI race.
-    const result = await page.evaluate(async (s: string) => {
-      try {
-        // @ts-expect-error wails runtime binding
-        await window.go.app.App.StartIdeaSession(s, 'testagent', false)
-        return { ok: true }
-      } catch (e) {
-        return { ok: false, err: String(e) }
-      }
-    }, slug)
+    const [settled] = await settleBindings(page, [['StartIdeaSession', slug, 'testagent', false]])
+    const result = { ok: settled.status === 'fulfilled', err: settled.reason }
 
     expect(result.ok).toBe(false)
     expect(result.err).toMatch(/already running|stuck in running/i)
@@ -432,11 +417,8 @@ test.describe('Idea Session Flow', () => {
     await page.keyboard.press('Enter')
 
     await expect.poll(async () => {
-      return await page.evaluate(async () => {
-        // @ts-expect-error wails binding
-        const busy = ((await window.go.app.App.BusyRunningSessions()) ?? []) as Array<{ slug: string }>
-        return busy.map((s) => s.slug)
-      })
+      const busy = ((await callBinding<Array<{ slug: string }> | null>(page, 'BusyRunningSessions')) ?? [])
+      return busy.map((s) => s.slug)
     }, { timeout: 10000 }).toContain(slug)
   })
 
@@ -460,20 +442,17 @@ test.describe('Idea Session Flow', () => {
     await page.keyboard.press('Enter')
 
     await expect.poll(async () => {
-      return await page.evaluate(async (s) => {
-        // @ts-expect-error wails binding
-        const list = (await window.go.app.App.ListIdeaSessions(s)) as Array<{
-          uuid: string
-          status: string
-          stop_reason?: string
-          previous_uuid?: string
-        }>
-        return list.map((r) => ({
-          status: r.status,
-          stopReason: r.stop_reason ?? '',
-          hasPrev: Boolean(r.previous_uuid),
-        }))
-      }, slug)
+      const list = await callBinding<Array<{
+        uuid: string
+        status: string
+        stop_reason?: string
+        previous_uuid?: string
+      }>>(page, 'ListIdeaSessions', slug)
+      return list.map((r) => ({
+        status: r.status,
+        stopReason: r.stop_reason ?? '',
+        hasPrev: Boolean(r.previous_uuid),
+      }))
     }, { timeout: 10000 }).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ status: 'completed', stopReason: 'cleared' }),
@@ -505,20 +484,17 @@ test.describe('Idea Session Flow', () => {
     await page.keyboard.press('Enter')
 
     await expect.poll(async () => {
-      return await page.evaluate(async (s) => {
-        // @ts-expect-error wails binding
-        const list = (await window.go.app.App.ListIdeaSessions(s)) as Array<{
-          uuid: string
-          status: string
-          stop_reason?: string
-          previous_uuid?: string
-        }>
-        return list.map((r) => ({
-          status: r.status,
-          stopReason: r.stop_reason ?? '',
-          hasPrev: Boolean(r.previous_uuid),
-        }))
-      }, slug)
+      const list = await callBinding<Array<{
+        uuid: string
+        status: string
+        stop_reason?: string
+        previous_uuid?: string
+      }>>(page, 'ListIdeaSessions', slug)
+      return list.map((r) => ({
+        status: r.status,
+        stopReason: r.stop_reason ?? '',
+        hasPrev: Boolean(r.previous_uuid),
+      }))
     }, { timeout: 10000 }).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ status: 'completed', stopReason: 'compacted' }),
@@ -545,10 +521,7 @@ test.describe('Idea Session Flow', () => {
     await expect.poll(readTerminalText, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS }).toContain('mcp connected:')
 
     for (let i = 0; i < 12; i++) {
-      await page.evaluate(({ id, n }) => {
-        // @ts-expect-error wails binding
-        return window.go.app.App.WriteToSession(id, `/stream 0s pad line ${n}\r`)
-      }, { id: uuid, n: i })
+      await callBinding(page, 'WriteToSession', uuid, `/stream 0s pad line ${i}\r`)
     }
 
     await expect.poll(readTerminalText, { timeout: 15000 })
@@ -580,10 +553,7 @@ test.describe('Idea Session Flow', () => {
     await expect.poll(readTerminalText, { timeout: AGENT_LIFECYCLE_TIMEOUT_MS }).toContain('mcp connected:')
 
     for (let i = 0; i < 12; i++) {
-      await page.evaluate(({ id, n }) => {
-        // @ts-expect-error wails binding
-        return window.go.app.App.WriteToSession(id, `/stream 0s pad line ${n}\r`)
-      }, { id: uuid, n: i })
+      await callBinding(page, 'WriteToSession', uuid, `/stream 0s pad line ${i}\r`)
     }
     await expect.poll(readTerminalText, { timeout: 15000 })
       .toContain('[viewport-input-echo] pad line 11')

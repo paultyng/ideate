@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import * as fs from 'fs'
 import * as path from 'path'
+import { callBinding } from './backend'
 
 const REPO_PATH = process.env.TEST_DIFF_REPO || process.cwd().replace('/frontend', '')
 const REVIEWS_DIR = process.env.TEST_REVIEWS_DIR
@@ -40,10 +41,7 @@ test.describe('IdeaDetail pending-review indicator', () => {
     const name = `Review Indicator ${Date.now()}`
     await page.goto('/')
 
-    const slug = await page.evaluate(async (n) => {
-      // @ts-expect-error wails binding
-      return (await window.go.app.App.CreateIdea(n, 'active', '')) as string
-    }, name)
+    const slug = await callBinding<string>(page, 'CreateIdea', name, 'active', '')
 
     // Seed a context.md so the idea sidebar lists more than idea.md.
     const ideaDir = path.join(IDEAS_DIR, slug)

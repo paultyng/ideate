@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { getMountedSessionId, stopAllRunningSessions } from './ptyCapture'
+import { stopAllRunningSessions } from './ptyCapture'
+import { callBinding, getMountedSessionId } from './backend'
 
 const ideasDir = process.env.TEST_IDEAS_DIR || ''
 
@@ -40,10 +41,7 @@ test.describe('Command palette', () => {
   test('Cmd+K opens the palette when the orchestrator terminal is focused', async ({ page }) => {
     await page.goto('/')
 
-    await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartRootSession('testagent')
-    })
+    await callBinding(page, 'StartRootSession', 'testagent')
 
     // Drawer is pinned on home; wait for the host terminal to mount.
     await page.waitForSelector('.orchestrator-host .terminal-container', { timeout: 10000 })
@@ -186,10 +184,7 @@ test.describe('Command palette', () => {
   test('selecting Orchestrator focuses the terminal helper textarea', async ({ page }) => {
     await page.goto('/')
     // OrchestratorHost only mounts when a root session exists.
-    await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StartRootSession('testagent')
-    })
+    await callBinding(page, 'StartRootSession', 'testagent')
     // Navigate off-dashboard so the drawer goes from closed → opened
     // via the palette path (on / the drawer is pinned and the test
     // doesn't exercise the mount-on-visible race).
@@ -294,10 +289,7 @@ test.describe('Command palette', () => {
 
     // Stop the live session; the coordinator flips the on-disk record
     // to status="stopped" once the PTY exits. Poll until that lands.
-    await page.evaluate(async (id) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (window as any).go.app.App.StopSession(id)
-    }, uuid)
+    await callBinding(page, 'StopSession', uuid)
     const sessionPath = path.join(ideasDir, slug, 'sessions', `${uuid}.json`)
     await expect.poll(async () => {
       const raw = await fs.readFile(sessionPath, 'utf-8').catch(() => '')

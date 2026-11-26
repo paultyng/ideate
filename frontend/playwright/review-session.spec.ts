@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { promises as fs } from 'fs'
 import * as path from 'path'
 import { stopAllRunningSessions } from './ptyCapture'
+import { callBinding } from './backend'
 
 const ideasDir = process.env.TEST_IDEAS_DIR || ''
 const reviewsDir = process.env.TEST_REVIEWS_DIR || ''
@@ -109,10 +110,7 @@ test.describe('Review-session integration', () => {
 
     // Get the running session UUID; both records (session + review) need
     // to point at the same UUID for the clear lookup to match.
-    const sessions = await page.evaluate(async (s: string) => {
-      // @ts-expect-error wails binding
-      return await window.go.app.App.ListIdeaSessions(s)
-    }, slug)
+    const sessions = await callBinding<Array<{ uuid: string }>>(page, 'ListIdeaSessions', slug)
     const sessionUUID = sessions[0].uuid
 
     const reviewID = 'rev-cancel-clears-1234567890abcdef'
@@ -122,10 +120,7 @@ test.describe('Review-session integration', () => {
     await expect(page.locator('.session-review-banner')).toBeVisible({ timeout: 5000 })
 
     // Cancel via the Wails binding (the same path the UI Cancel button uses).
-    await page.evaluate(async (id: string) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.CancelReview(id)
-    }, reviewID)
+    await callBinding(page, 'CancelReview', reviewID)
 
     // Banner should clear within the polling window.
     await expect(page.locator('.session-review-banner')).toBeHidden({ timeout: 5000 })
@@ -140,10 +135,7 @@ test.describe('Review-session integration', () => {
     const slug = await createIdea(page, 'Submit Returns Session Test')
     await startTestagent(page)
 
-    const sessions = await page.evaluate(async (s: string) => {
-      // @ts-expect-error wails binding
-      return await window.go.app.App.ListIdeaSessions(s)
-    }, slug)
+    const sessions = await callBinding<Array<{ uuid: string }>>(page, 'ListIdeaSessions', slug)
     const sessionUUID = sessions[0].uuid
 
     const reviewID = 'rev-submit-returns-1234567890abcdef'

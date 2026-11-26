@@ -5,6 +5,7 @@ import {
   waitForAgentReady,
   waitForTerminalMount,
 } from './ptyCapture'
+import { callBinding, evalTerminals } from './backend'
 
 // Orchestrator full-screen route + drawer pin behavior.
 // The terminal is mounted exactly once at App root and CSS-positioned
@@ -50,11 +51,7 @@ test.describe('Orchestrator full-screen', () => {
     await page.goto('/')
     await enablePtyCapture(page)
 
-    const root = await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const W = window as any
-      return (await W.go.app.App.StartRootSession('testagent')) as { uuid: string }
-    })
+    const root = await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')
 
     // Drawer is auto-pinned on /; wait for the host's terminal to mount.
     await page.waitForSelector('[data-testid="orchestrator-host"] .terminal-container', { timeout: 10_000 })
@@ -65,9 +62,8 @@ test.describe('Orchestrator full-screen', () => {
     // it (e.g. portal target change unmounted the React subtree),
     // the post-transition lookup would either miss the property or
     // find a different instance.
-    const fingerprint = await page.evaluate((id) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = (window as any).__ideateTerminals[id] as Record<string, unknown> | undefined
+    const fingerprint = await evalTerminals(page, (reg, id: string) => {
+      const t = reg![id] as Record<string, unknown> | undefined
       if (!t) return null
       const fp = `fp-${Math.random()}`
       t.__ideateTestFingerprint = fp
@@ -83,9 +79,8 @@ test.describe('Orchestrator full-screen', () => {
 
     // Host should be in fullscreen mode, and the *same* terminal
     // instance — recognizable by its test fingerprint — is still there.
-    const duringFullscreen = await page.evaluate((id) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = (window as any).__ideateTerminals[id] as Record<string, unknown> | undefined
+    const duringFullscreen = await evalTerminals(page, (reg, id: string) => {
+      const t = reg![id] as Record<string, unknown> | undefined
       const host = document.querySelector('[data-testid="orchestrator-host"]')
       const mode = host?.className.split(' ').find((c) => c.startsWith('orchestrator-host--')) ?? null
       return { fp: (t?.__ideateTestFingerprint as string | undefined) ?? null, mode }
@@ -102,9 +97,8 @@ test.describe('Orchestrator full-screen', () => {
     await expect(page).not.toHaveURL(/#\/orchestrator/)
     await expect(page.locator('[data-testid="orchestrator-drawer"]')).toBeVisible()
 
-    const afterCollapse = await page.evaluate((id) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const t = (window as any).__ideateTerminals[id] as Record<string, unknown> | undefined
+    const afterCollapse = await evalTerminals(page, (reg, id: string) => {
+      const t = reg![id] as Record<string, unknown> | undefined
       const host = document.querySelector('[data-testid="orchestrator-host"]')
       const mode = host?.className.split(' ').find((c) => c.startsWith('orchestrator-host--')) ?? null
       return { fp: (t?.__ideateTestFingerprint as string | undefined) ?? null, mode }
@@ -121,18 +115,12 @@ test.describe('Orchestrator full-screen', () => {
   test('stopping the root session re-shows the start form', async ({ page }) => {
     await page.goto('/')
 
-    const root = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      return (await window.go.app.App.StartRootSession('testagent')) as { uuid: string }
-    })
+    const root = await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')
     await page.waitForSelector('[data-testid="orchestrator-host"] .terminal-container', { timeout: 10_000 })
 
     // Stop it via the binding (same code path as /exit, modulo the
     // status reason). The context's status-listener should clear uuid.
-    await page.evaluate(async (id) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.StopSession(id)
-    }, root.uuid)
+    await callBinding(page, 'StopSession', root.uuid)
 
     // Start form returns: agent picker + Start button.
     const agentSelect = page.locator('.orchestrator-drawer-agent select')

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { enablePtyCapture, readSessionReplay, stopAllRunningSessions, waitForAgentReady, waitForTerminalMount } from './ptyCapture'
+import { callBinding } from './backend'
 
 // End-to-end coverage for the Phase C orchestrator orchestration tools.
 // The /mcp-call slash on the upstream paultyng/testagent claude
@@ -26,24 +27,11 @@ test.describe('Orchestrator orchestrator', () => {
     // every introspection path so the orchestrator can't target itself.
     await page.goto('/')
     await enablePtyCapture(page)
-    const ideaResult = await page.evaluate(async (name) => {
-      // @ts-expect-error wails binding
-      const slug = (await window.go.app.App.CreateIdea(name, 'active', '')) as string
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartIdeaSession(slug, 'testagent', false)) as {
-        uuid: string
-        uuid: string
-      }
-      return { slug, ...r }
-    }, ideaName)
+    const slug = await callBinding<string>(page, 'CreateIdea', ideaName, 'active', '')
+    const ideaSession = await callBinding<{ uuid: string }>(page, 'StartIdeaSession', slug, 'testagent', false)
+    const ideaResult = { slug, ...ideaSession }
 
-    const scratch = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      return (await window.go.app.App.StartRootSession('testagent')) as {
-        uuid: string
-        uuid: string
-      }
-    })
+    const scratch = await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')
 
     // Drawer is auto-pinned on the dashboard (/) so it's already
     // visible — no toggle click needed. Wait for the terminal
@@ -58,10 +46,7 @@ test.describe('Orchestrator orchestrator', () => {
     // we poll for the banner.
     await waitForTerminalMount(page, scratch.uuid, 15000)
     await waitForAgentReady(page, scratch.uuid)
-    await page.evaluate(async (uuid) => {
-      // @ts-expect-error wails binding
-      await window.go.app.App.WriteToSession(uuid, '/mcp-call ideate.list_sessions {}\r')
-    }, scratch.uuid)
+    await callBinding(page, 'WriteToSession', scratch.uuid, '/mcp-call ideate.list_sessions {}\r')
 
     // Poll the orchestrator's vscreen for the success line or an mcp
     // error so failures surface a real reason rather than timing out
@@ -91,28 +76,16 @@ test.describe('Orchestrator orchestrator', () => {
 
     await page.goto('/')
     await enablePtyCapture(page)
-    const ideaResult = await page.evaluate(async (name) => {
-      // @ts-expect-error wails binding
-      const slug = (await window.go.app.App.CreateIdea(name, 'active', '')) as string
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartIdeaSession(slug, 'testagent', false)) as {
-        uuid: string
-        uuid: string
-      }
-      return { slug, ...r }
-    }, ideaName)
+    const slug = await callBinding<string>(page, 'CreateIdea', ideaName, 'active', '')
+    const ideaSession = await callBinding<{ uuid: string }>(page, 'StartIdeaSession', slug, 'testagent', false)
+    const ideaResult = { slug, ...ideaSession }
 
-    const scratch = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      return (await window.go.app.App.StartRootSession('testagent')) as {
-        uuid: string
-      }
-    })
+    const scratch = await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')
 
     // Drawer is auto-pinned on /, so it's already visible without
     // toggling. Wait for its terminal then hash-nav to the idea
     // session view so the per-idea TerminalPanel mounts too —
-    // both terminals stream into __ideateTerminals, where the
+    // both terminals stream into the terminal registry, where the
     // orchestrator's input lands in the target buffer.
     await page.waitForSelector('.orchestrator-host .terminal-container', { timeout: 10000 })
 
@@ -142,13 +115,7 @@ test.describe('Orchestrator orchestrator', () => {
       uuid: ideaResult.uuid,
       text: 'orch hello',
     })
-    await page.evaluate(
-      async ([uuid, payload]) => {
-        // @ts-expect-error wails binding
-        await window.go.app.App.WriteToSession(uuid, `/mcp-call ideate.send_session_input ${payload}\r`)
-      },
-      [scratch.uuid, args] as const,
-    )
+    await callBinding(page, 'WriteToSession', scratch.uuid, `/mcp-call ideate.send_session_input ${args}\r`)
 
     // Target session's vscreen gets the wrapped prefix + payload.
     // Surface any ✗ mcp error from the orchestrator side first —
@@ -176,23 +143,11 @@ test.describe('Orchestrator orchestrator', () => {
 
     await page.goto('/')
     await enablePtyCapture(page)
-    const ideaResult = await page.evaluate(async (name) => {
-      // @ts-expect-error wails binding
-      const slug = (await window.go.app.App.CreateIdea(name, 'active', '')) as string
-      // @ts-expect-error wails binding
-      const r = (await window.go.app.App.StartIdeaSession(slug, 'testagent', false)) as {
-        uuid: string
-        uuid: string
-      }
-      return { slug, ...r }
-    }, ideaName)
+    const slug = await callBinding<string>(page, 'CreateIdea', ideaName, 'active', '')
+    const ideaSession = await callBinding<{ uuid: string }>(page, 'StartIdeaSession', slug, 'testagent', false)
+    const ideaResult = { slug, ...ideaSession }
 
-    const scratch = await page.evaluate(async () => {
-      // @ts-expect-error wails binding
-      return (await window.go.app.App.StartRootSession('testagent')) as {
-        uuid: string
-      }
-    })
+    const scratch = await callBinding<{ uuid: string }>(page, 'StartRootSession', 'testagent')
 
     // Mount both terminals — the per-idea TerminalPanel is what
     // surfaces the reply tool's MCP server endpoint registration.
@@ -229,13 +184,7 @@ test.describe('Orchestrator orchestrator', () => {
       text: 'check the index strategy',
       include_reply_hint: true,
     })
-    await page.evaluate(
-      async ([uuid, payload]) => {
-        // @ts-expect-error wails binding
-        await window.go.app.App.WriteToSession(uuid, `/mcp-call ideate.send_session_input ${payload}\r`)
-      },
-      [scratch.uuid, sendArgs] as const,
-    )
+    await callBinding(page, 'WriteToSession', scratch.uuid, `/mcp-call ideate.send_session_input ${sendArgs}\r`)
 
     // Wait until the idea-side vscreen shows the input prefix —
     // proves the delegation reached the receiver.
@@ -248,13 +197,7 @@ test.describe('Orchestrator orchestrator', () => {
     // testagent's /mcp command piggybacks on its per-idea MCP server,
     // which now carries the reply tool registered in addTools.
     const replyArgs = JSON.stringify({ text: 'leaning incremental WAL' })
-    await page.evaluate(
-      async ([uuid, payload]) => {
-        // @ts-expect-error wails binding
-        await window.go.app.App.WriteToSession(uuid, `/mcp-call ideate.reply_to_orchestrator ${payload}\r`)
-      },
-      [ideaResult.uuid, replyArgs] as const,
-    )
+    await callBinding(page, 'WriteToSession', ideaResult.uuid, `/mcp-call ideate.reply_to_orchestrator ${replyArgs}\r`)
 
     // Step 3 — assert the reply lands in the orchestrator terminal with
     // the "[Reply from <idea name>]" prefix. Read the orchestrator's
@@ -270,18 +213,17 @@ test.describe('Orchestrator orchestrator', () => {
     // orchestrator between StartRootSession and the moment the reply
     // lands.
     await expect.poll(async () => {
-      const orch = await page.evaluate(async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const W = window as any
-        try {
-          const cur = (await W.go.app.App.GetRunningRootSession()) as { uuid: string }
-          if (!cur?.uuid) return ''
-          const b64 = (await W.go.app.App.GetSessionReplay(cur.uuid)) as string
-          return b64 ? atob(b64) : ''
-        } catch {
-          return ''
+      let orch = ''
+      try {
+        const cur = await callBinding<{ uuid: string }>(page, 'GetRunningRootSession')
+        if (cur?.uuid) {
+          const b64 = await callBinding<string>(page, 'GetSessionReplay', cur.uuid)
+          // Latin-1 decode, matching atob.
+          orch = b64 ? Buffer.from(b64, 'base64').toString('latin1') : ''
         }
-      })
+      } catch {
+        orch = ''
+      }
       if (orch.includes(`[Reply from ${ideaName}]`) && orch.includes('leaning incremental WAL')) return 'ok'
       const idea = await readSessionReplay(page, ideaResult.uuid)
       if (idea.includes('✗ mcp error')) return 'err'

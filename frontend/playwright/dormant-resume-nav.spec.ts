@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { getMountedSessionId, stopAllRunningSessions } from './ptyCapture'
+import { stopAllRunningSessions } from './ptyCapture'
+import { callBinding, settleBindings, delayBinding, getMountedSessionId } from './backend'
 
 // Dormant sessions should be navigation-treated like running sessions
 // from every entry point (home card, idea-detail terminal toggle,
@@ -41,10 +42,7 @@ async function createDormantSession(page: import('@playwright/test').Page, slug:
   // The panel can remount on /session/new, briefly emptying the registry.
   const uuid = await getMountedSessionId(page, 10_000)
 
-  await page.evaluate(async (id) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (window as any).go.app.App.StopSession(id)
-  }, uuid)
+  await callBinding(page, 'StopSession', uuid)
   const sessionPath = path.join(ideasDir, slug, 'sessions', `${uuid}.json`)
   await expect.poll(async () => {
     const raw = await fs.readFile(sessionPath, 'utf-8').catch(() => '')
@@ -56,13 +54,7 @@ async function createDormantSession(page: import('@playwright/test').Page, slug:
   // the `session:<uuid>:status` event fires (same as crash-recovery).
   // An earlier version wrote `status='dormant'` directly to disk,
   // bypassing the event — see docs/test-drift-audit.md.
-  await page.evaluate(
-    async ({ slug, uuid }) => {
-      // @ts-expect-error wails dev-only binding
-      await window.go.app.App.ForceDormantSession(slug, uuid)
-    },
-    { slug, uuid },
-  )
+  await callBinding(page, 'ForceDormantSession', slug, uuid)
   await expect.poll(async () => {
     const raw = await fs.readFile(sessionPath, 'utf-8').catch(() => '')
     if (!raw) return ''
@@ -86,15 +78,7 @@ test.describe('Dormant resume on navigation', () => {
 
     // Delay the summaries binding so ListIdeas resolves first. In-app nav
     // (no reload) keeps the wrapper installed.
-    await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app = (window as any).go.app.App
-      const orig = app.ListSessionSummaries
-      app.ListSessionSummaries = async () => {
-        await new Promise((r) => setTimeout(r, 2000))
-        return orig()
-      }
-    })
+    await delayBinding(page, 'ListSessionSummaries', 2000)
     await page.click('button[aria-label="Home"]')
     const card = page.locator('.idea-card', { hasText: name })
     await expect(card).toBeVisible({ timeout: 10000 })
@@ -149,21 +133,10 @@ test.describe('Dormant resume on navigation', () => {
     const slug = await createIdea(page, `Dormant Concurrent ${Date.now()}`)
     const uuid = await createDormantSession(page, slug)
 
-    const results = await page.evaluate(
-      async ({ slug, uuid }) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const app = (window as any).go.app.App
-        const settled = await Promise.allSettled([
-          app.ResumeIdeaSession(slug, uuid),
-          app.ResumeIdeaSession(slug, uuid),
-        ])
-        return settled.map((r) => ({
-          status: r.status,
-          reason: r.status === 'rejected' ? String(r.reason) : '',
-        }))
-      },
-      { slug, uuid },
-    )
+    const results = await settleBindings(page, [
+      ['ResumeIdeaSession', slug, uuid],
+      ['ResumeIdeaSession', slug, uuid],
+    ])
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const rejected = results.filter((r) => r.status === 'rejected')
@@ -204,10 +177,7 @@ test.describe('Dormant resume on navigation', () => {
     await page.click('button:has-text("Start Session")')
     await page.waitForSelector('.terminal-container .xterm-screen', { timeout: 10000 })
     const uuid = await getMountedSessionId(page)
-    await page.evaluate(async (id) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (window as any).go.app.App.StopSession(id)
-    }, uuid)
+    await callBinding(page, 'StopSession', uuid)
     const sessionPath = path.join(ideasDir, slug, 'sessions', `${uuid}.json`)
     await expect.poll(async () => {
       const raw = await fs.readFile(sessionPath, 'utf-8').catch(() => '')

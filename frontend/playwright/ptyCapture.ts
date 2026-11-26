@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { callBinding, stopAllSessions, waitForTerminals } from './backend'
 
 // enablePtyCapture turns on the test-only side-channel for raw PTY
 // bytes (see frontend/src/lib/ptyCapture.ts). Call once per test
@@ -45,34 +46,25 @@ export async function enablePtyCapture(page: Page): Promise<void> {
 // it for "did this just print?" checks, because it will pass even
 // when the user can't actually see the output.
 export async function readSessionReplay(page: Page, uuid: string): Promise<string> {
-  return await page.evaluate(async (id) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const W = window as any
-    try {
-      const b64 = (await W.go.app.App.GetSessionReplay(id)) as string
-      if (!b64) return ''
-      // atob returns a Latin-1 string (one char per byte). Multi-byte
-      // UTF-8 characters like "▶" split into 3 chars under Latin-1
-      // and won't match against UTF-8 string literals in the test.
-      // Re-decode through TextDecoder so the result is proper UTF-8.
-      const binStr = atob(b64)
-      const arr = new Uint8Array(binStr.length)
-      for (let i = 0; i < binStr.length; i++) arr[i] = binStr.charCodeAt(i)
-      const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(arr)
-      // Same ANSI strip as capturePty's readCaptured — keep semantics aligned.
-      return utf8
-        // eslint-disable-next-line no-control-regex
-        .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
-        // eslint-disable-next-line no-control-regex
-        .replace(/\x1b[@-Z\\-_]/g, '')
-        // eslint-disable-next-line no-control-regex
-        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-        // eslint-disable-next-line no-control-regex
-        .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
-    } catch {
-      return ''
-    }
-  }, uuid)
+  try {
+    const b64 = await callBinding<string>(page, 'GetSessionReplay', uuid)
+    if (!b64) return ''
+    // Decode bytes as UTF-8 (a Latin-1 decode would split multi-byte
+    // characters like "▶" into 3 chars and miss UTF-8 string literals).
+    const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(Buffer.from(b64, 'base64'))
+    // Same ANSI strip as capturePty's readCaptured — keep semantics aligned.
+    return utf8
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b[@-Z\\-_]/g, '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+  } catch {
+    return ''
+  }
 }
 
 // stopAllRunningSessions kills every running session via the
@@ -94,56 +86,11 @@ export async function readSessionReplay(page: Page, uuid: string): Promise<strin
 export async function stopAllRunningSessions(page: Page): Promise<void> {
   // A crashed/closed page would throw here and mask the test's real failure.
   if (page.isClosed()) return
-  await page.evaluate(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const W = window as any
-    if (!W.go?.app?.App) return
-    // Wails serializes a nil Go slice as JSON null; coerce so the
-    // for-of below doesn't throw when there's nothing to clean up.
-    const active = ((await W.go.app.App.ListActiveSessions()) ?? []) as Array<{ uuid: string }>
-    for (const s of active) {
-      try { await W.go.app.App.StopSession(s.uuid) } catch { /* already gone */ }
-    }
-    // ListActiveSessions intentionally omits the root orchestrator
-    // (it has its own dedicated drawer surface). Stop it explicitly
-    // so the inactivity-exit watchdog doesn't fire mid-test on a
-    // orchestrator that's shared across every orchestrator spec.
-    const root = await W.go.app.App.GetRunningRootSession() as { uuid?: string } | null
-    if (root?.uuid) {
-      try { await W.go.app.App.StopSession(root.uuid) } catch { /* already gone */ }
-    }
-    // Wait for the async status-callback chain to flip disk records
-    // to Status!=running. Poll for up to 5s; long enough for PTY
-    // exit + finalizeSession in normal cases, short enough that a
-    // genuinely-wedged session surfaces as a flake rather than
-    // wedging the whole suite.
-    const deadline = Date.now() + 5000
-    while (Date.now() < deadline) {
-      const remaining = ((await W.go.app.App.ListActiveSessions()) ?? []) as Array<{ uuid: string }>
-      const rootNow = await W.go.app.App.GetRunningRootSession() as { uuid?: string } | null
-      if (remaining.length === 0 && !rootNow?.uuid) return
-      await new Promise((r) => setTimeout(r, 50))
-    }
-  })
-}
-
-// getMountedSessionId returns one mounted TerminalPanel's session id —
-// the last one in insertion order — for tests that started a session
-// via the form flow (no binding return value handing back the uuid).
-// Waits for the registry entry: `.xterm-screen` can appear before
-// TerminalPanel's effect registers the id.
-export async function getMountedSessionId(page: Page, timeoutMs = 5_000): Promise<string> {
-  const handle = await page.waitForFunction(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
-    const keys = reg ? Object.keys(reg) : []
-    return keys.length ? keys[keys.length - 1] : false
-  }, undefined, { timeout: timeoutMs })
-  return (await handle.jsonValue()) as string
+  await stopAllSessions(page)
 }
 
 // waitForTerminalMount blocks until TerminalPanel has registered the
-// session id on `window.__ideateTerminals` — which happens in the
+// session id in the terminal registry — which happens in the
 // same useEffect that wires the `session:<id>:output` subscription
 // and the capturePty hook. Use this between hash-nav and any
 // WriteToSession on the just-mounted session so live bytes aren't
@@ -153,15 +100,7 @@ export async function waitForTerminalMount(
   sessionId: string,
   timeoutMs = 5_000,
 ): Promise<void> {
-  await page.waitForFunction(
-    (id) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reg = (window as any).__ideateTerminals as Record<string, unknown> | undefined
-      return Boolean(reg && reg[id])
-    },
-    sessionId,
-    { timeout: timeoutMs },
-  )
+  await waitForTerminals(page, (reg, id) => Boolean(reg && reg[id]), sessionId, { timeout: timeoutMs })
 }
 
 // AGENT_LIFECYCLE_TIMEOUT_MS is the shared budget for any wait that blocks

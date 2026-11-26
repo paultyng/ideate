@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { getMountedSessionId } from './ptyCapture'
+import { evalTerminals, getMountedSessionId } from './backend'
 
 // In-line copy of the createIdea helper used elsewhere — kept inline
 // matching the established pattern (idea-session.spec.ts, dashboard.spec.ts,
@@ -28,7 +28,7 @@ async function createIdea(page: import('@playwright/test').Page, name: string): 
 // The test bypasses the PTY (testagent has no color-emitting slash
 // command surfaced through `WriteToSession`) and writes the escape
 // sequence directly to the Terminal instance via the existing
-// `__ideateTerminals` test affordance (TerminalPanel.tsx:65). The
+// terminal-registry test affordance (TerminalPanel.tsx:65). The
 // rendered cell's foreground colour is then read from the same buffer
 // API a real claude render would land on.
 
@@ -48,9 +48,8 @@ test.describe('Terminal color rendering', () => {
     // row below testagent's banner so the marker doesn't collide with
     // the boot text. The sequence: `\r\n` + green + literal text + reset.
     const marker = 'IDEATE_COLOR_PROBE_GREEN'
-    await page.evaluate(({ id, payload }) => {
-      const reg = (window as unknown as { __ideateTerminals?: Record<string, { write: (s: string) => void } > }).__ideateTerminals
-      const t = reg?.[id]
+    await evalTerminals(page, (reg, { id, payload }: { id: string; payload: string }) => {
+      const t = (reg as Record<string, { write: (s: string) => void }> | undefined)?.[id]
       if (!t) throw new Error(`no Terminal registered for session ${id}`)
       t.write('\r\n\x1b[32m' + payload + '\x1b[0m\r\n')
     }, { id: uuid, payload: marker })
@@ -60,23 +59,21 @@ test.describe('Terminal color rendering', () => {
     // when truecolor); 0 means "default" (no color). The exact index
     // is xterm-version-dependent — assert "not default" rather than
     // pinning to a specific number.
-    const result = await page.evaluate(async ({ id, payload }) => {
+    const result = await evalTerminals(page, async (regAny, { id, payload }: { id: string; payload: string }) => {
       // Allow xterm one frame to commit the buffer write.
       await new Promise((r) => requestAnimationFrame(() => r(null)))
 
-      const reg = (window as unknown as {
-        __ideateTerminals?: Record<string, {
-          buffer: {
-            active: {
-              length: number
-              getLine: (i: number) => {
-                translateToString: (trim?: boolean) => string
-                getCell: (col: number) => { getFgColor: () => number; isFgDefault: () => boolean }
-              } | undefined
-            }
+      const reg = regAny as Record<string, {
+        buffer: {
+          active: {
+            length: number
+            getLine: (i: number) => {
+              translateToString: (trim?: boolean) => string
+              getCell: (col: number) => { getFgColor: () => number; isFgDefault: () => boolean }
+            } | undefined
           }
-        }>
-      }).__ideateTerminals
+        }
+      }> | undefined
       const t = reg?.[id]
       if (!t) return { error: 'no terminal' }
 
