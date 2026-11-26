@@ -210,3 +210,70 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// A git-repo idea indexes only its own top-level *.md: repo subdirs get no
+// index.md (which could overwrite tracked files), yet the idea stays listed.
+func TestIndexRepoIdeaSkipsSubdirs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, dir := newTestStore(t)
+
+	idea := &model.Idea{Name: "Repo Idea", Description: "Is a repo.", Body: "b\n"}
+	if err := s.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	base := filepath.Join(dir, idea.Slug)
+	writeFile(t, filepath.Join(base, ".git", "HEAD"), "ref: x\n")
+	writeFile(t, filepath.Join(base, "docs", "x.md"), "# doc\n")
+	writeFile(t, filepath.Join(base, "node_modules", "p", "y.md"), "# dep\n")
+	if err := s.regenerateIndexes(); err != nil {
+		t.Fatalf("regenerateIndexes: %v", err)
+	}
+	assertNoFile(t, filepath.Join(base, "docs", indexFilename))
+	assertNoFile(t, filepath.Join(base, "node_modules", "p", indexFilename))
+	if rootIdx := readFile(t, filepath.Join(dir, indexFilename)); !strings.Contains(rootIdx, idea.Slug) {
+		t.Errorf("root index.md missing repo idea:\n%s", rootIdx)
+	}
+}
+
+// A hand-written index.md is never overwritten, even in a normal subdir.
+func TestIndexKeepsHandWrittenIndex(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, dir := newTestStore(t)
+
+	idea := &model.Idea{Name: "Alpha Idea", Description: "First.", Body: "b\n"}
+	if err := s.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	notes := filepath.Join(dir, idea.Slug, "notes")
+	const hand = "# Notes\n\nHand-written prose.\n"
+	writeFile(t, filepath.Join(notes, "n.md"), "# n\n")
+	writeFile(t, filepath.Join(notes, indexFilename), hand)
+	if err := s.regenerateIndexes(); err != nil {
+		t.Fatalf("regenerateIndexes: %v", err)
+	}
+	if got := readFile(t, filepath.Join(notes, indexFilename)); got != hand {
+		t.Errorf("hand-written index.md overwritten:\n%s", got)
+	}
+}
+
+func TestIsGeneratedIndex(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"empty", "", true},
+		{"sections", "# A\n\n* [x](x.md) - d\n* [y](y.md)\n\n# B\n\n* [z](z.md)\n", true},
+		{"frontmatter", "---\nokf_version: \"0.2\"\n---\n\n# A\n\n* [x](x.md)\n", true},
+		{"prose", "# A\n\nprose\n", false},
+		{"list before heading", "* [x](x.md)\n# A\n", false},
+		{"other frontmatter", "---\ntitle: x\n---\n\n# A\n", false},
+	} {
+		if got := isGeneratedIndex([]byte(tc.in)); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

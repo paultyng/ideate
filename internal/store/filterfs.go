@@ -107,7 +107,8 @@ var (
 // (config.json, history.jsonl, backlog.json). go-okf's Load
 // must see none of that, so the predicate skips any path with a segment in
 // the excluded-directory set or starting with ".", any directory inside an
-// idea that holds a .git entry (a checkout), plus any regular file that is not
+// idea that holds a .git entry (a checkout) or sits in an idea that is itself
+// a git repo, plus any regular file that is not
 // a *.md concept. raw must be the unfiltered bundle FS; d may be nil.
 func newBundleExclude(raw fs.FS) func(p string, d fs.DirEntry) bool {
 	excludedDirs := map[string]bool{
@@ -136,8 +137,12 @@ func newBundleExclude(raw fs.FS) func(p string, d fs.DirEntry) bool {
 				return true
 			}
 			if d.IsDir() && len(segs) >= 2 {
-				if _, err := fs.Stat(raw, path.Join(p, ".git")); err == nil {
-					return true
+				// An idea that is itself a git repo indexes only its own
+				// top-level *.md; every subdir is repo content.
+				for _, dir := range []string{segs[0], p} {
+					if _, err := fs.Stat(raw, path.Join(dir, ".git")); err == nil {
+						return true
+					}
 				}
 			}
 		}
