@@ -201,7 +201,10 @@ tasks:
 
   test:
     desc: Run Go tests with the race detector
-    cmd: go test -race ./...
+    cmds:
+      - go test -race ./...
+      - go test -tags bindings ./internal/config/
+      - scripts/cleanup-stray-index_test.sh
 
   lint:
     desc: Run Go linter

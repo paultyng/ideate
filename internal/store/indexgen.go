@@ -1,9 +1,14 @@
 package store
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	okf "github.com/paultyng/go-okf"
 	"github.com/paultyng/ideate/internal/atomicfile"
@@ -19,7 +24,7 @@ const indexFilename = "index.md"
 
 // regenerateIndexes rebuilds every index.md in the ideas bundle: the
 // bundle-root listing (one entry per idea) and a per-idea listing (that
-// idea's concepts). It loads the bundle through the filterFS/bundleExclude
+// idea's concepts). It loads the bundle through the filterFS/newBundleExclude
 // view so go-okf only sees concepts (idea.md, context/*.md) and never
 // repos/, sessions/, or the root JSON sidecars, then persists each
 // regenerated index.md atomically.
@@ -41,7 +46,8 @@ func (s *FSStore) regenerateIndexes() error {
 	s.indexMu.Lock()
 	defer s.indexMu.Unlock()
 
-	b, err := okf.Load(newFilterFS(os.DirFS(s.ideasDir), bundleExclude))
+	raw := os.DirFS(s.ideasDir)
+	b, err := okf.Load(newFilterFS(raw, newBundleExclude(raw)))
 	if err != nil {
 		return fmt.Errorf("loading okf bundle: %w", err)
 	}
@@ -56,9 +62,42 @@ func (s *FSStore) regenerateIndexes() error {
 			}
 		}
 		target := filepath.Join(s.ideasDir, filepath.FromSlash(dir), indexFilename)
+		if existing, rerr := os.ReadFile(target); rerr == nil {
+			if !isGeneratedIndex(existing) {
+				slog.Warn("not overwriting hand-written index.md", slog.String("path", target))
+				continue
+			}
+		} else if !errors.Is(rerr, fs.ErrNotExist) {
+			return fmt.Errorf("reading %s: %w", target, rerr)
+		}
 		if err := atomicfile.Write(target, data, 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", target, err)
 		}
 	}
 	return nil
+}
+
+var (
+	generatedIndexLine   = regexp.MustCompile(`^\* \[[^\]]*\]\([^)]*\)( - .*)?$`)
+	generatedFrontmatter = regexp.MustCompile(`^---\nokf_version: [^\n]*\n---\n`)
+)
+
+// isGeneratedIndex reports whether data has the shape go-okf's Index.Bytes
+// emits: optional okf_version frontmatter, then only "# heading" and
+// "* [title](link)[ - desc]" lines, headed by a heading. Empty data counts as
+// generated (nothing to lose).
+func isGeneratedIndex(data []byte) bool {
+	body := generatedFrontmatter.ReplaceAllString(string(data), "")
+	seen := false
+	for _, line := range strings.Split(body, "\n") {
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "# "):
+			seen = true
+		case seen && generatedIndexLine.MatchString(line):
+		default:
+			return false
+		}
+	}
+	return seen || strings.TrimSpace(string(data)) == ""
 }
