@@ -297,12 +297,14 @@ test.describe('Command palette', () => {
       return (JSON.parse(raw) as { status?: string }).status || ''
     }, { timeout: 5000 }).not.toBe('running')
 
-    // Promote stopped → dormant on disk. The adopt sweep does this on
-    // startup for idle idea sessions; the test mimics it directly so
-    // we don't have to restart the app mid-spec.
-    const record = JSON.parse(await fs.readFile(sessionPath, 'utf-8')) as Record<string, unknown>
-    record.status = 'dormant'
-    await fs.writeFile(sessionPath, JSON.stringify(record, null, 2))
+    // Promote stopped → dormant through the real markSessionDormant
+    // path (as the adopt sweep does on startup) so the status event fires.
+    await callBinding(page, 'ForceDormantSession', slug, uuid)
+    await expect.poll(async () => {
+      const raw = await fs.readFile(sessionPath, 'utf-8').catch(() => '')
+      if (!raw) return ''
+      return (JSON.parse(raw) as { status?: string }).status || ''
+    }, { timeout: 5000 }).toBe('dormant')
 
     await page.goto('/')
     await openPalette(page)
