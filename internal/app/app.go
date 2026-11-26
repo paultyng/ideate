@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -198,10 +199,11 @@ func runOKFMigration(st *store.FSStore) {
 }
 
 // newIdeaGetter builds the IdeaGetter callback registered with the
-// Claude runner. AddDirs include the idea root plus every directory
-// under `<idea>/repos` so Claude's per-dir skill discovery picks up
-// `.claude/skills/` directories committed inside each repo. Repos are
-// enumerated with a plain directory read (no git) so session spawn
+// Claude runner. AddDirs include the idea root plus one primary worktree
+// per repo under `<idea>/repos` (Claude Code prompts to trust each
+// --add-dir, so one per repo keeps prompts bounded) so Claude's per-dir
+// skill discovery picks up `.claude/skills/` committed inside each repo.
+// Repos are enumerated with plain file reads (no git) so session spawn
 // stays fast. A failure to read the dir must not block session start;
 // log + fall back to `[ideaDir]` only.
 func newIdeaGetter(st store.Store, ideasDir string) func(slug string) (*agent.IdeaContext, error) {
@@ -220,17 +222,71 @@ func newIdeaGetter(st store.Store, ideasDir string) func(slug string) (*agent.Id
 				slog.String("slug", slug),
 				slog.Any("err", err))
 		default:
-			for _, e := range entries {
-				if e.IsDir() {
-					addDirs = append(addDirs, filepath.Join(ideaDir, "repos", e.Name()))
-				}
-			}
+			addDirs = append(addDirs, primaryRepoDirs(filepath.Join(ideaDir, "repos"), entries)...)
 		}
 		return &agent.IdeaContext{
 			Idea:    *idea,
 			AddDirs: addDirs,
 		}, nil
 	}
+}
+
+// primaryRepoDirs picks one directory per canonical repo among the entries of
+// reposDir (sorted, as from os.ReadDir): the one named after the canonical
+// repo, else the lexically first. A worktree's canonical repo comes from its
+// `.git` file; clones and unreadable or unrecognized `.git` entries form their
+// own group.
+func primaryRepoDirs(reposDir string, entries []fs.DirEntry) []string {
+	type group struct {
+		base    string
+		primary string
+		named   bool
+	}
+	var order []string
+	groups := map[string]*group{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(reposDir, e.Name())
+		key := canonicalRepo(dir)
+		g, ok := groups[key]
+		if !ok {
+			g = &group{base: filepath.Base(key), primary: dir}
+			groups[key] = g
+			order = append(order, key)
+		}
+		if !g.named && e.Name() == g.base {
+			g.primary, g.named = dir, true
+		}
+	}
+	out := make([]string, 0, len(order))
+	for _, k := range order {
+		out = append(out, groups[k].primary)
+	}
+	return out
+}
+
+// canonicalRepo returns the common repo root for a git worktree dir, or dir
+// itself when it is a clone or the `.git` file is missing or unrecognized.
+func canonicalRepo(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return dir
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	if !ok {
+		return dir
+	}
+	gitdir = strings.TrimSpace(gitdir)
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(dir, gitdir)
+	}
+	root, _, found := strings.Cut(filepath.ToSlash(filepath.Clean(gitdir)), "/.git/worktrees/")
+	if !found || root == "" {
+		return dir
+	}
+	return filepath.FromSlash(root)
 }
 
 // Startup is called when the Wails app starts. It initializes the IPC server,

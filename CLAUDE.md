@@ -421,7 +421,7 @@ User-level knobs live in `<ideas-dir>/config.json`. Per-agent runner settings ne
 - `agents.claude.add_dirs` — extra `--add-dir` paths appended for every Claude session. `~` and `$VARS` are expanded at session start.
 - `agents.claude.extra_args` — verbatim CLI flags appended **after** every Ideate-managed flag (so the user's `--model` / `--debug` wins by last-occurrence). Overriding Ideate's own flags (`--settings`, `--mcp-config`, `--resume`, `--session-id`) will break hooks, MCP, and resume.
 
-Per-idea `--add-dir` paths are computed automatically and include the idea root **plus every linked repo's absolute path** — so per-repo `.claude/skills/` directories are picked up without listing them in `config.json`. User-configured paths union on top, deduped, with the per-idea entries first.
+Per-idea `--add-dir` paths are computed automatically and include the idea root **plus one primary worktree per linked repo** — so per-repo `.claude/skills/` directories are picked up without listing them in `config.json`. User-configured paths union on top, deduped, with the per-idea entries first.
 
 Config is re-read on every Claude session start or resume. Edits to `config.json` land on the next session without an app restart; no fsnotify watcher.
 
