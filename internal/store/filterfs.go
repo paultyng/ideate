@@ -99,39 +99,48 @@ var (
 	_ fs.StatFS    = (*filterFS)(nil)
 )
 
-// bundleExclude is the skip predicate that reduces the ideas directory to
-// its OKF-concept view. The ideas directory is a single OKF bundle whose
+// newBundleExclude returns the skip predicate that reduces the ideas directory
+// to its OKF-concept view. The ideas directory is a single OKF bundle whose
 // concepts are the per-idea idea.md/context/*.md files plus reserved
 // index.md; the same tree also holds git worktrees (repos/), session JSON
 // (sessions/), backups (.backups/), and root JSON/JSONL sidecars
 // (config.json, history.jsonl, backlog.json). go-okf's Load
-// must see none of that, so bundleExclude skips any path with a segment in
-// the excluded-directory set, plus any regular file that is not a *.md
-// concept. d may be nil; the segment rule needs only the path.
-func bundleExclude(p string, d fs.DirEntry) bool {
+// must see none of that, so the predicate skips any path with a segment in
+// the excluded-directory set or starting with ".", any directory inside an
+// idea that holds a .git entry (a checkout), plus any regular file that is not
+// a *.md concept. raw must be the unfiltered bundle FS; d may be nil.
+func newBundleExclude(raw fs.FS) func(p string, d fs.DirEntry) bool {
 	excludedDirs := map[string]bool{
 		"repos":    true,
 		"sessions": true,
 		".backups": true,
 	}
-	for _, seg := range strings.Split(p, "/") {
-		if excludedDirs[seg] {
-			return true
+	return func(p string, d fs.DirEntry) bool {
+		segs := strings.Split(p, "/")
+		for _, seg := range segs {
+			if excludedDirs[seg] || (seg != "." && strings.HasPrefix(seg, ".")) {
+				return true
+			}
 		}
+		if d != nil {
+			// Reject symlinks: os.DirFS follows them, so a *.md symlink whose
+			// target sits outside the bundle (in repos/, another idea, or off
+			// the tree entirely) would pull that target's content into the OKF
+			// view and into index.md. DirEntry.Type reflects the lstat mode
+			// (ReadDir/WalkDir don't follow), so the symlink is dropped at
+			// discovery and never opened.
+			if d.Type()&fs.ModeSymlink != 0 {
+				return true
+			}
+			if !d.IsDir() && !strings.HasSuffix(p, ".md") {
+				return true
+			}
+			if d.IsDir() && len(segs) >= 2 {
+				if _, err := fs.Stat(raw, path.Join(p, ".git")); err == nil {
+					return true
+				}
+			}
+		}
+		return false
 	}
-	if d != nil {
-		// Reject symlinks: os.DirFS follows them, so a *.md symlink whose
-		// target sits outside the bundle (in repos/, another idea, or off
-		// the tree entirely) would pull that target's content into the OKF
-		// view and into index.md. DirEntry.Type reflects the lstat mode
-		// (ReadDir/WalkDir don't follow), so the symlink is dropped at
-		// discovery and never opened.
-		if d.Type()&fs.ModeSymlink != 0 {
-			return true
-		}
-		if !d.IsDir() && !strings.HasSuffix(p, ".md") {
-			return true
-		}
-	}
-	return false
 }

@@ -124,6 +124,84 @@ func TestBundleExcludeSkipsSymlink(t *testing.T) {
 	}
 }
 
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func assertNoFile(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("%s unexpectedly exists: err=%v", path, err)
+	}
+}
+
+// Dot-dirs and nested git checkouts inside an idea must never receive an
+// index.md, while ordinary content subdirs still do.
+func TestIndexSkipsDotDirsAndCheckouts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, dir := newTestStore(t)
+
+	idea := &model.Idea{Name: "Alpha Idea", Description: "First.", Body: "b\n"}
+	if err := s.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	base := filepath.Join(dir, idea.Slug)
+	md := "# doc\n\nbody\n"
+	writeFile(t, filepath.Join(base, ".reviews", "r.md"), md)
+	writeFile(t, filepath.Join(base, ".worktrees", "x", "w.md"), md)
+	writeFile(t, filepath.Join(base, ".worktrees", "x", "sub", "w2.md"), md)
+	writeFile(t, filepath.Join(base, "somecheckout", ".git"), "gitdir: /nowhere\n")
+	writeFile(t, filepath.Join(base, "somecheckout", "c.md"), md)
+	writeFile(t, filepath.Join(base, "somecheckout", "sub", "c2.md"), md)
+	writeFile(t, filepath.Join(base, "notes", "n.md"), md)
+	writeFile(t, filepath.Join(base, "gitdircheckout", ".git", "HEAD"), "ref: x\n")
+	writeFile(t, filepath.Join(base, "gitdircheckout", "g.md"), md)
+
+	if err := s.regenerateIndexes(); err != nil {
+		t.Fatalf("regenerateIndexes: %v", err)
+	}
+
+	for _, p := range []string{
+		".reviews", ".worktrees", filepath.Join(".worktrees", "x"), filepath.Join(".worktrees", "x", "sub"),
+		"somecheckout", filepath.Join("somecheckout", "sub"), "gitdircheckout",
+	} {
+		assertNoFile(t, filepath.Join(base, p, indexFilename))
+	}
+	if _, err := os.Stat(filepath.Join(base, "notes", indexFilename)); err != nil {
+		t.Errorf("notes/index.md missing: %v", err)
+	}
+	if rootIdx := readFile(t, filepath.Join(dir, indexFilename)); !strings.Contains(rootIdx, idea.Slug) {
+		t.Errorf("root index.md missing idea:\n%s", rootIdx)
+	}
+}
+
+// An idea dir that is itself a git repo is still an idea, not a checkout.
+func TestIndexKeepsIdeaThatIsGitRepo(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, dir := newTestStore(t)
+
+	idea := &model.Idea{Name: "Repo Idea", Description: "Is a repo.", Body: "b\n"}
+	if err := s.Create(ctx, idea); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	writeFile(t, filepath.Join(dir, idea.Slug, ".git", "HEAD"), "ref: x\n")
+	if err := s.regenerateIndexes(); err != nil {
+		t.Fatalf("regenerateIndexes: %v", err)
+	}
+	if rootIdx := readFile(t, filepath.Join(dir, indexFilename)); !strings.Contains(rootIdx, idea.Slug) {
+		t.Errorf("root index.md dropped git-repo idea:\n%s", rootIdx)
+	}
+	readFile(t, filepath.Join(dir, idea.Slug, indexFilename))
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

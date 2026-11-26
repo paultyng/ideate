@@ -19,7 +19,7 @@ const indexFilename = "index.md"
 
 // regenerateIndexes rebuilds every index.md in the ideas bundle: the
 // bundle-root listing (one entry per idea) and a per-idea listing (that
-// idea's concepts). It loads the bundle through the filterFS/bundleExclude
+// idea's concepts). It loads the bundle through the filterFS/newBundleExclude
 // view so go-okf only sees concepts (idea.md, context/*.md) and never
 // repos/, sessions/, or the root JSON sidecars, then persists each
 // regenerated index.md atomically.
@@ -41,7 +41,8 @@ func (s *FSStore) regenerateIndexes() error {
 	s.indexMu.Lock()
 	defer s.indexMu.Unlock()
 
-	b, err := okf.Load(newFilterFS(os.DirFS(s.ideasDir), bundleExclude))
+	raw := os.DirFS(s.ideasDir)
+	b, err := okf.Load(newFilterFS(raw, newBundleExclude(raw)))
 	if err != nil {
 		return fmt.Errorf("loading okf bundle: %w", err)
 	}
