@@ -98,11 +98,29 @@ test.describe('Close guard dialog', () => {
     await page.goto('/')
     await expect(page.locator('.dashboard')).toBeVisible({ timeout: 5000 })
 
-    // CloseGuardDialog gates on `sessions && sessions.length > 0` —
-    // an empty payload must NOT render the modal.
-    await fireCloseBlocked(page, [])
+    // CloseGuardDialog gates on `sessions && sessions.length > 0`.
+    // Both payloads land in one `busy` state, so the end state can't
+    // tell a gated [] from a rendered one. Record every distinct
+    // overlay heading as it paints: an ungated [] would show up as
+    // "0 active sessions" before FAKE_BUSY replaces it.
+    await page.evaluate(() => {
+      const w = window as unknown as { __guardHeadings: string[] }
+      w.__guardHeadings = []
+      new MutationObserver(() => {
+        const h = document.querySelector('.close-guard-overlay h2')?.textContent
+        if (h && w.__guardHeadings[w.__guardHeadings.length - 1] !== h) w.__guardHeadings.push(h)
+      }).observe(document.body, { childList: true, subtree: true, characterData: true })
+    })
 
-    await page.waitForTimeout(200)
-    await expect(page.locator('.close-guard-overlay')).toHaveCount(0)
+    await fireCloseBlocked(page, [])
+    await fireCloseBlocked(page, FAKE_BUSY)
+
+    const overlay = page.locator('.close-guard-overlay')
+    await expect(overlay).toHaveCount(1)
+    await expect(overlay).toContainText('Demo Idea')
+    const headings = await page.evaluate(
+      () => (window as unknown as { __guardHeadings: string[] }).__guardHeadings,
+    )
+    expect(headings).toEqual(['2 active sessions'])
   })
 })
