@@ -18,7 +18,7 @@ func SocketPath() (string, error) {
 	}
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(config.DefaultConfigDir(), "ideate.sock"), nil
+		return darwinSocketPath(config.DefaultConfigDir())
 
 	case "linux":
 		if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
@@ -36,4 +36,11 @@ func SocketPath() (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
+}
+
+func darwinSocketPath(configDir string) (string, error) {
+	if configDir == "" {
+		return "", fmt.Errorf("resolving config directory: empty")
+	}
+	return filepath.Join(configDir, "ideate.sock"), nil
 }

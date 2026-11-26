@@ -15,3 +15,13 @@ func TestSocketPath(t *testing.T) {
 		t.Fatal("SocketPath() returned empty string")
 	}
 }
+
+func TestDarwinSocketPathEmptyConfigDir(t *testing.T) {
+	t.Parallel()
+	if p, err := darwinSocketPath(""); err == nil {
+		t.Fatalf("expected error, got %q", p)
+	}
+	if p, err := darwinSocketPath("/c"); err != nil || p != "/c/ideate.sock" {
+		t.Fatalf("got %q, %v", p, err)
+	}
+}
