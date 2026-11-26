@@ -1,7 +1,8 @@
 import { test, expect, Page } from '@playwright/test'
 import * as fs from 'fs'
+import * as os from 'os'
 import * as path from 'path'
-import { callBinding } from './backend'
+import { callBinding, cancelPendingReviews } from './backend'
 
 // Survival across app close/reopen has two halves: drafts persist to disk
 // while editing, and the footer's alerts zone surfaces pending reviews
@@ -9,8 +10,9 @@ import { callBinding } from './backend'
 // Playwright can't
 // truly restart the daemon, so the autosave half is verified by reading
 // the on-disk review record after the debounce, and the hydrate half is
-// verified by seeding draft_* fields on a pending record and opening the
-// URL fresh.
+// verified by creating a review through RequestMarkdownReview, saving a
+// draft through SaveMarkdownReviewDraft, and reloading the page. Diff
+// reviews have no creation binding, so they are still seeded on disk.
 
 const REPO_PATH = process.env.TEST_DIFF_REPO || process.cwd().replace('/frontend', '')
 
@@ -69,6 +71,26 @@ function readMarkdownReview(id: string): MarkdownReviewRecord {
   return JSON.parse(fs.readFileSync(reviewPath(id), 'utf-8')) as MarkdownReviewRecord
 }
 
+// requestMarkdown writes a real .md file and creates the review through
+// the production binding (which also emits review:changed). Reviews are
+// cancelled in afterEach via cancelPendingReviews.
+async function requestMarkdown(page: Page, name: string, content = '# Title\n'): Promise<string> {
+  const file = path.join(os.tmpdir(), `ideate-persist-${name}-${Date.now()}-${Math.floor(Math.random() * 1e6)}.md`)
+  await fs.promises.writeFile(file, content)
+  const r = await callBinding<{ id: string }>(page, 'RequestMarkdownReview', file, '')
+  return r.id
+}
+
+// requestMarkdownAt is requestMarkdown with an exact file basename, for
+// assertions on the chip label.
+async function requestMarkdownAt(page: Page, basename: string): Promise<string> {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'ideate-persist-'))
+  const file = path.join(dir, basename)
+  await fs.promises.writeFile(file, '# Title\n')
+  const r = await callBinding<{ id: string }>(page, 'RequestMarkdownReview', file, '')
+  return r.id
+}
+
 function cleanReview(id: string): void {
   try { fs.unlinkSync(reviewPath(id)) } catch { /* ignore */ }
 }
@@ -103,13 +125,10 @@ test.describe('Review persistence — drafts survive close/reopen', () => {
   const seededIds = [
     'persistence-diff-autosave',
     'persistence-diff-hydrate',
-    'persistence-md-autosave',
-    'persistence-md-hydrate',
-    'persistence-bar-diff',
-    'persistence-bar-md',
   ]
 
-  test.afterEach(() => {
+  test.afterEach(async ({ page }) => {
+    await cancelPendingReviews(page)
     for (const id of seededIds) cleanReview(id)
   })
 
@@ -162,12 +181,8 @@ test.describe('Review persistence — drafts survive close/reopen', () => {
   })
 
   test('markdown review source-mode edit autosaves to draft_marked_up', async ({ page }) => {
-    const id = 'persistence-md-autosave'
-    writeReview({
-      id, kind: 'markdown', status: 'pending',
-      created: new Date().toISOString(),
-      markdown: { path: '/tmp/test/persistence-md.md', original: '# Original\n' },
-    })
+    await page.goto('/')
+    const id = await requestMarkdown(page, 'autosave', '# Original\n')
 
     await page.goto(`/#/review?reviewId=${id}`)
     await page.waitForSelector('[data-testid="markdown-review-editor"]', { timeout: 15000 })
@@ -192,12 +207,8 @@ test.describe('Review persistence — drafts survive close/reopen', () => {
   })
 
   test('markdown draft flushes on route nav-away before debounce fires', async ({ page }) => {
-    const id = 'persistence-md-autosave'
-    writeReview({
-      id, kind: 'markdown', status: 'pending',
-      created: new Date().toISOString(),
-      markdown: { path: '/tmp/test/persistence-md-flush.md', original: '# Original\n' },
-    })
+    await page.goto('/')
+    const id = await requestMarkdown(page, 'flush', '# Original\n')
 
     await page.goto(`/#/review?reviewId=${id}`)
     await page.waitForSelector('[data-testid="markdown-review-editor"]', { timeout: 15000 })
@@ -242,20 +253,15 @@ test.describe('Review persistence — drafts survive close/reopen', () => {
   })
 
   test('markdown review hydrates source from draft_marked_up', async ({ page }) => {
-    const id = 'persistence-md-hydrate'
     const drafted = '# Original\n\n{++a sentence the human added++}\n'
-    writeReview({
-      id, kind: 'markdown', status: 'pending',
-      created: new Date().toISOString(),
-      draft_body: 'restored summary',
-      markdown: {
-        path: '/tmp/test/persistence-md-hydrate.md',
-        original: '# Original\n',
-        draft_marked_up: drafted,
-      },
-    })
+    await page.goto('/')
+    const id = await requestMarkdown(page, 'hydrate', '# Original\n')
+    await callBinding(page, 'SaveMarkdownReviewDraft', id, 'restored summary', drafted)
 
+    // Fresh mount: navigate, then reload so hydration comes from the
+    // persisted draft rather than component state.
     await page.goto(`/#/review?reviewId=${id}`)
+    await page.reload()
     await page.waitForSelector('[data-testid="markdown-review-editor"]', { timeout: 15000 })
 
     await expect(page.locator('.review-summary-input')).toHaveValue('restored summary')
@@ -268,7 +274,8 @@ test.describe('Review persistence — drafts survive close/reopen', () => {
 test.describe('Pending reviews bar — chip surfaces open reviews', () => {
   const ids = ['persistence-bar-diff', 'persistence-bar-md']
 
-  test.afterEach(() => {
+  test.afterEach(async ({ page }) => {
+    await cancelPendingReviews(page)
     for (const id of ids) cleanReview(id)
   })
 
@@ -302,20 +309,16 @@ test.describe('Pending reviews bar — chip surfaces open reviews', () => {
   })
 
   test('markdown review chip uses the file basename', async ({ page }) => {
-    const id = 'persistence-bar-md'
-    writeReview({
-      id, kind: 'markdown', status: 'pending',
-      created: new Date().toISOString(),
-      markdown: { path: '/tmp/test/proposal.md', original: '# Title\n' },
-    })
-
     await page.goto('/')
+    const id = await requestMarkdownAt(page, 'proposal.md')
     const chip = page.locator(`[data-testid="pending-review-chip"][data-review-id="${id}"]`)
     await expect(chip).toBeVisible({ timeout: 10000 })
     await expect(chip).toContainText('proposal.md')
   })
 
   test('chip carries fromSession when the review knows its origin', async ({ page }) => {
+    // No binding sets Session on a review (only the MCP path does), so
+    // this one record stays disk-seeded.
     const id = 'persistence-bar-md'
     writeReview({
       id, kind: 'markdown', status: 'pending',
@@ -340,17 +343,11 @@ test.describe('Pending reviews bar — chip surfaces open reviews', () => {
   })
 
   test('chip omits fromSession when origin session is unknown', async ({ page }) => {
-    // Disk seed without session/idea_slug — covers the orphaned-review
-    // path (orchestrator started a review then died, or the original
-    // session never had a session UUID on disk).
-    const id = 'persistence-bar-md'
-    writeReview({
-      id, kind: 'markdown', status: 'pending',
-      created: new Date().toISOString(),
-      markdown: { path: '/tmp/test/origin.md', original: '# Title\n' },
-    })
-
+    // No session/idea_slug — covers the orphaned-review path
+    // (orchestrator started a review then died, or the original session
+    // never had a session UUID on disk).
     await page.goto('/')
+    const id = await requestMarkdownAt(page, 'origin.md')
     const chip = page.locator(`[data-testid="pending-review-chip"][data-review-id="${id}"]`)
     await expect(chip).toBeVisible({ timeout: 10000 })
     await chip.click()
@@ -361,14 +358,8 @@ test.describe('Pending reviews bar — chip surfaces open reviews', () => {
   })
 
   test('chip disappears via review:changed event, not polling backstop', async ({ page }) => {
-    const id = 'persistence-bar-md'
-    writeReview({
-      id, kind: 'markdown', status: 'pending',
-      created: new Date().toISOString(),
-      markdown: { path: '/tmp/test/event.md', original: '# Title\n' },
-    })
-
     await page.goto('/')
+    const id = await requestMarkdownAt(page, 'event.md')
     const chip = page.locator(`[data-testid="pending-review-chip"][data-review-id="${id}"]`)
     await expect(chip).toBeVisible({ timeout: 10000 })
 
