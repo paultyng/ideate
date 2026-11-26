@@ -60,7 +60,10 @@ jobs:
         run: cd frontend && npx tsc --noEmit
 
       - name: Test
-        run: go test -race ./...
+        run: |
+          go test -race ./...
+          go test -tags bindings ./internal/config/
+          scripts/cleanup-stray-index_test.sh
 
       - name: Build
         run: cd cmd/ideate && wails build

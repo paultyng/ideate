@@ -204,6 +204,7 @@ tasks:
     cmds:
       - go test -race ./...
       - go test -tags bindings ./internal/config/
+      - scripts/cleanup-stray-index_test.sh
 
   lint:
     desc: Run Go linter
